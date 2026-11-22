@@ -8,7 +8,7 @@ import {
 } from '@clipply/crypto';
 import { kvRepo, migrate, type SqlDb } from '@clipply/database';
 import { createLogger } from '@clipply/logger';
-import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, RELEASES_API, saveFileName, UpdateChecker, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
+import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, RELEASES_LATEST, saveFileName, UpdateChecker, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
 import type { AccountClient, BackupActions, ClipplyClient, UpdateClient } from '@clipply/ui';
 
 import { b64ToBytes, bytesToB64, ClipplyNative, type InboxEntry } from './native';
@@ -226,14 +226,15 @@ export async function boot(): Promise<Runtime> {
     currentVersion: appVersion,
     fetchLatest: async () => {
       const res = await CapacitorHttp.get({
-        url: RELEASES_API,
-        responseType: 'json',
+        url: RELEASES_LATEST,
+        disableRedirects: true,
         connectTimeout: 10_000,
         readTimeout: 10_000,
-        headers: { accept: 'application/vnd.github+json', 'user-agent': 'Clipply' },
+        headers: { 'user-agent': 'Clipply' },
       });
-      if (res.status !== 200) throw new Error(`GitHub answered ${res.status}`);
-      return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+      if (res.status < 300 || res.status >= 400) throw new Error(`GitHub answered ${res.status}`);
+      const location = Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === 'location')?.[1];
+      return location === undefined ? null : String(location);
     },
     store: { get: () => kv.get('update.check'), set: (v) => kv.set('update.check', v) },
   });

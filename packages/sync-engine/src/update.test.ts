@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 
-import { AUTO_CHECK_INTERVAL, compareVersions, parseLatestRelease, RELEASES_PAGE, UpdateChecker } from './update';
+import { AUTO_CHECK_INTERVAL, compareVersions, parseLatestLocation, RELEASES_PAGE, UpdateChecker } from './update';
 
 describe('versions', () => {
   it('compares numerically, with or without a v prefix', () => {
@@ -11,16 +11,18 @@ describe('versions', () => {
     expect(compareVersions('0.1.1', '0.2.0')).toBeLessThan(0);
   });
 
-  it('reads only published, plain x.y.z releases', () => {
-    expect(parseLatestRelease({ tag_name: 'v0.2.0', draft: false, prerelease: false })).toBe('0.2.0');
-    expect(parseLatestRelease({ tag_name: 'v0.2.0', prerelease: true })).toBeNull();
-    expect(parseLatestRelease({ tag_name: 'v0.2.0', draft: true })).toBeNull();
-    expect(parseLatestRelease({ tag_name: 'v0.2.0-beta.1' })).toBeNull();
-    expect(parseLatestRelease({ message: 'Not Found' })).toBeNull();
+  it('reads only plain x.y.z tags of this project from the latest-release redirect', () => {
+    expect(parseLatestLocation(`${RELEASES_PAGE}/tag/v0.2.0`)).toBe('0.2.0');
+    expect(parseLatestLocation('/Sharif-Minhaz/clipply/releases/tag/v0.2.0')).toBe('0.2.0');
+    expect(parseLatestLocation(`${RELEASES_PAGE}/tag/v0.2.0-beta.1`)).toBeNull();
+    expect(parseLatestLocation(RELEASES_PAGE)).toBeNull();
+    expect(parseLatestLocation('https://evil.example/Sharif-Minhaz/clipply/releases/tag/v9.9.9')).toBeNull();
+    expect(parseLatestLocation('https://github.com/someone/else/releases/tag/v9.9.9')).toBeNull();
+    expect(parseLatestLocation(null)).toBeNull();
   });
 });
 
-function setup(responses: unknown[]) {
+function setup(responses: Array<string | null | Error>) {
   let t = 1_000_000;
   let stored: { latest: string; checkedAt: number } | undefined;
   let calls = 0;
@@ -30,7 +32,7 @@ function setup(responses: unknown[]) {
       calls++;
       const r = responses.shift();
       if (r instanceof Error) throw r;
-      return r;
+      return r ?? null;
     },
     store: { get: async () => stored, set: async (v) => void (stored = v) },
     now: () => t,
@@ -40,19 +42,19 @@ function setup(responses: unknown[]) {
 
 describe('UpdateChecker', () => {
   it('reports a newer release with a link built from its tag', async () => {
-    const s = setup([{ tag_name: 'v0.2.0' }]);
+    const s = setup([`${RELEASES_PAGE}/tag/v0.2.0`]);
     expect((await s.checker.state()).available).toBe(false);
     const state = await s.checker.check();
     expect(state).toMatchObject({ current: '0.1.1', latest: '0.2.0', available: true, url: `${RELEASES_PAGE}/tag/v0.2.0` });
   });
 
   it('is not available when the latest release is this version or older', async () => {
-    const s = setup([{ tag_name: 'v0.1.1' }]);
+    const s = setup([`${RELEASES_PAGE}/tag/v0.1.1`]);
     expect(await s.checker.check()).toMatchObject({ available: false, url: RELEASES_PAGE });
   });
 
   it('checks automatically at most once per interval, but always when forced', async () => {
-    const s = setup([{ tag_name: 'v0.1.1' }, { tag_name: 'v0.1.2' }, { tag_name: 'v0.1.3' }]);
+    const s = setup([`${RELEASES_PAGE}/tag/v0.1.1`, `${RELEASES_PAGE}/tag/v0.1.2`, `${RELEASES_PAGE}/tag/v0.1.3`]);
     await s.checker.check();
     await s.checker.check();
     expect(s.calls()).toBe(1);
@@ -63,14 +65,14 @@ describe('UpdateChecker', () => {
   });
 
   it('keeps the previous result when a check fails', async () => {
-    const s = setup([{ tag_name: 'v0.2.0' }, new Error('offline')]);
+    const s = setup([`${RELEASES_PAGE}/tag/v0.2.0`, new Error('offline')]);
     await s.checker.check();
     await expect(s.checker.check({ force: true })).rejects.toThrow('offline');
     expect(await s.checker.state()).toMatchObject({ latest: '0.2.0', available: true });
   });
 
   it('rejects a response without a usable version', async () => {
-    const s = setup([{ message: 'API rate limit exceeded' }]);
+    const s = setup([null]);
     await expect(s.checker.check()).rejects.toThrow(/release version/);
     expect(s.stored()).toBeUndefined();
   });

@@ -50,7 +50,7 @@ describe('UpdatePanel', () => {
   it('explains a failed check without dropping the version', async () => {
     render(<UpdatePanel client={client(upToDate, new Error('offline'))} autoCheck={false} onAutoCheck={() => {}} />);
     await userEvent.click(await screen.findByRole('button', { name: /check for updates/i }));
-    expect(await screen.findByText(/could not reach github/i)).toBeTruthy();
+    expect(await screen.findByText(/could not check github for updates/i)).toBeTruthy();
     expect(screen.getByText(/Clipply 0\.1\.1/)).toBeTruthy();
   });
 });

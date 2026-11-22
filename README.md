@@ -366,7 +366,7 @@ Both apps can tell you when a new version is out: **Settings → Updates** shows
 
 What it does, and what it does not do:
 
-- **One anonymous request** to GitHub's public API: `GET https://api.github.com/repos/Sharif-Minhaz/clipply/releases/latest`. No account, device id, token or anything about your clips is sent. GitHub sees your IP address, as with any website.
+- **One anonymous request** to GitHub: `GET https://github.com/Sharif-Minhaz/clipply/releases/latest`, reading only the version from where it redirects (the REST API is avoided because its anonymous limit of 60 requests an hour is shared by everyone on the same network). No account, device id, token or anything about your clips is sent. GitHub sees your IP address, as with any website.
 - **At most once a day**, when the app opens (Android) or its window gets focus (desktop). Nothing is polled in the background. Pressing "Check for updates" always checks.
 - **Check only.** Clipply never downloads or installs anything by itself, and the Android app does not have the "install other apps" permission.
 - **The link cannot be redirected.** The app reads only the version number from GitHub's answer and builds the link to `github.com/Sharif-Minhaz/clipply/releases/tag/v<version>` itself; drafts and pre-releases are ignored.

@@ -53,7 +53,7 @@ export function UpdatePanel({ client, autoCheck, onAutoCheck }: { client: Update
       setState(await client.check());
       setJustChecked(true);
     } catch {
-      setError('Could not reach GitHub. Check your connection and try again.');
+      setError('Could not check GitHub for updates. Check your connection and try again later.');
     } finally {
       setChecking(false);
     }

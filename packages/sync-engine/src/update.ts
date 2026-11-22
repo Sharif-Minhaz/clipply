@@ -1,13 +1,16 @@
-import { z } from 'zod';
-
 /**
  * "Is there a newer release?" — check only, never download or install. GitHub Releases is the
- * only distribution channel, so the one request is an anonymous GET to GitHub's public API: no
- * ids, no account, nothing about the user's clips. The link shown is built from the version tag,
- * never taken from the response, so it can only point at this project's release page.
+ * only distribution channel, so the one request is an anonymous GET to GitHub: no ids, no account,
+ * nothing about the user's clips. The link shown is built from the version tag, never taken from
+ * the response, so it can only point at this project's release page.
+ *
+ * The request goes to the web page `releases/latest` (redirect not followed) rather than the REST
+ * API: the API allows 60 anonymous requests an hour per IP, shared by everyone behind the same
+ * NAT, and answers 403 once that is spent. The page redirects to `…/releases/tag/<tag>` of the
+ * newest published release (drafts and pre-releases excluded, as with the API).
  */
-export const RELEASES_API = 'https://api.github.com/repos/Sharif-Minhaz/clipply/releases/latest';
 export const RELEASES_PAGE = 'https://github.com/Sharif-Minhaz/clipply/releases';
+export const RELEASES_LATEST = `${RELEASES_PAGE}/latest`;
 
 /** Automatic checks happen on app open / window focus, at most this often. */
 export const AUTO_CHECK_INTERVAL = 24 * 3_600_000;
@@ -26,17 +29,21 @@ export function compareVersions(a: string, b: string): number {
   return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
 }
 
-const LatestRelease = z.object({
-  tag_name: z.string().max(64),
-  draft: z.boolean().optional(),
-  prerelease: z.boolean().optional(),
-});
-
-/** Version from GitHub's `releases/latest` response; null for drafts, pre-releases or odd tags. */
-export function parseLatestRelease(json: unknown): string | null {
-  const r = LatestRelease.safeParse(json);
-  if (!r.success || r.data.draft || r.data.prerelease) return null;
-  const v = parseVersion(r.data.tag_name);
+/**
+ * Version from the `Location` of RELEASES_LATEST's redirect (absolute or relative); null unless it
+ * points at a plain x.y.z tag of this project (a redirect to `/releases` means no release yet).
+ */
+export function parseLatestLocation(location: string | null | undefined): string | null {
+  if (!location || location.length > 512) return null;
+  let url: URL;
+  try {
+    url = new URL(location, RELEASES_PAGE);
+  } catch {
+    return null;
+  }
+  const prefix = `${new URL(RELEASES_PAGE).pathname}/tag/`;
+  if (url.origin !== 'https://github.com' || !url.pathname.startsWith(prefix)) return null;
+  const v = parseVersion(decodeURIComponent(url.pathname.slice(prefix.length)));
   return v ? v.join('.') : null;
 }
 
@@ -57,8 +64,8 @@ interface Stored {
 
 export interface UpdateCheckerDeps {
   currentVersion: string;
-  /** GET RELEASES_API and return the parsed JSON body; throw on network / HTTP errors. */
-  fetchLatest: () => Promise<unknown>;
+  /** GET RELEASES_LATEST without following redirects; return the `Location` header (null if none). Throw on network errors. */
+  fetchLatest: () => Promise<string | null>;
   /** Persists the last result so the notice survives a restart without a new request. */
   store: { get(): Promise<Stored | undefined>; set(v: Stored): Promise<void> };
   now?: () => number;
@@ -107,7 +114,7 @@ export class UpdateChecker {
     if (!force && this.last && this.now() - this.last.checkedAt < AUTO_CHECK_INTERVAL) return this.toState();
     this.inflight ??= (async () => {
       try {
-        const latest = parseLatestRelease(await this.deps.fetchLatest());
+        const latest = parseLatestLocation(await this.deps.fetchLatest());
         if (!latest) throw new Error('GitHub did not return a release version');
         this.last = { latest, checkedAt: this.now() };
         await this.deps.store.set(this.last);

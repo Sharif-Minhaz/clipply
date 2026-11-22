@@ -7,7 +7,7 @@ import { itemRepo, kvRepo, migrate } from '@clipply/database';
 import { openNodeSqlite } from '@clipply/database/node';
 import { createLogger } from '@clipply/logger';
 import { MAX_THUMB_BYTES } from '@clipply/shared-schemas';
-import { AccountController, ClipLibrary, LinkPreviewer, RELEASES_API, UpdateChecker, uuidv7 } from '@clipply/sync-engine';
+import { AccountController, ClipLibrary, LinkPreviewer, RELEASES_LATEST, UpdateChecker, uuidv7 } from '@clipply/sync-engine';
 
 import { CH, type DesktopStatus } from '../shared/api';
 import { setAutostart } from './autostart';
@@ -231,12 +231,9 @@ async function main(): Promise<void> {
   const updates = new UpdateChecker({
     currentVersion: app.getVersion(),
     fetchLatest: async () => {
-      const res = await fetch(RELEASES_API, {
-        headers: { accept: 'application/vnd.github+json', 'user-agent': 'Clipply' },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
-      return res.json();
+      const res = await fetch(RELEASES_LATEST, { redirect: 'manual', headers: { 'user-agent': 'Clipply' }, signal: AbortSignal.timeout(10_000) });
+      if (res.status < 300 || res.status >= 400) throw new Error(`GitHub answered ${res.status}`);
+      return res.headers.get('location');
     },
     store: { get: () => updateKv.get('update.check'), set: (v) => updateKv.set('update.check', v) },
   });
