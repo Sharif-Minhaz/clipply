@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { app, dialog, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { initCrypto } from '@clipply/crypto';
 import { itemRepo, migrate } from '@clipply/database';
 import { openNodeSqlite } from '@clipply/database/node';
@@ -69,7 +69,9 @@ async function main(): Promise<void> {
   const appRoot = app.getAppPath();
   const icon = join(appRoot, 'resources', 'icon.png');
   const startHidden = process.argv.includes('--hidden');
-  const launchCommand = app.isPackaged ? [process.env.APPIMAGE ?? process.execPath] : [process.execPath, appRoot];
+  // Absolute: APPIMAGE is the path as typed (relative when launched as ./Clipply…), and the GNOME
+  // shortcut and autostart entry run from the home folder.
+  const launchCommand = app.isPackaged ? [resolve(process.env.APPIMAGE ?? process.execPath)] : [process.execPath, appRoot];
 
   // History is ciphertext, but it is still nobody else's business: SQLite gives -wal/-shm the
   // database file's permissions, so the file is created 0600 before SQLite opens it.

@@ -51,7 +51,9 @@ export async function gnomeShortcutInstalled(run: GSettingsRunner = runGSettings
     const key = `${SCHEMA}.custom-keybinding:${CLIPPLY_PATH}`;
     const [command, binding] = await Promise.all([run(['get', key, 'command']), run(['get', key, 'binding'])]);
     // Earlier builds put --ozone-platform=x11 in the command, which now starts a blurry window.
-    return command.trim() !== "''" && !command.includes('--ozone-platform') && binding.trim().toLowerCase() === `'${GNOME_BINDING.toLowerCase()}'`;
+    // A relative program path (an earlier bug) never runs from GNOME, so it counts as not installed.
+    const absolute = /^["']{1,2}\//.test(command.trim());
+    return absolute && !command.includes('--ozone-platform') && binding.trim().toLowerCase() === `'${GNOME_BINDING.toLowerCase()}'`;
   } catch {
     return false;
   }

@@ -200,8 +200,11 @@ describe('GNOME shortcut status', () => {
     const state = (command: string, binding: string) => async (args: string[]): Promise<string> =>
       args[1]!.endsWith('media-keys') ? `['${CLIPPLY_PATH}']` : args[2] === 'command' ? command : binding;
     expect(await gnomeShortcutInstalled(state("''", "''"))).toBe(false); // left by a failed install
-    expect(await gnomeShortcutInstalled(state("'clipply --toggle'", "'<Super><Shift>v'"))).toBe(false); // old binding
-    expect(await gnomeShortcutInstalled(state("'clipply --toggle'", "'<Super>v'"))).toBe(true);
+    expect(await gnomeShortcutInstalled(state("'/usr/bin/clipply --toggle'", "'<Super><Shift>v'"))).toBe(false); // old binding
+    // gsettings prints a command containing single quotes inside double quotes.
+    expect(await gnomeShortcutInstalled(state(`"'apps/dist/Clipply.AppImage' --toggle"`, "'<Super>v'"))).toBe(false); // relative path
+    expect(await gnomeShortcutInstalled(state(`"'/opt/Clipply.AppImage' --toggle"`, "'<Super>v'"))).toBe(true);
+    expect(await gnomeShortcutInstalled(state("'/usr/bin/clipply --toggle'", "'<Super>v'"))).toBe(true);
   });
 });
 
