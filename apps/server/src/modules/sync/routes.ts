@@ -28,11 +28,7 @@ export function syncRoutes(store: Store, now: () => number): Router {
   r.post('/push', async (req, res) => {
     const { userId, deviceId } = requireAuth(req);
     const body = parse(PushRequest, req.body);
-    const { results, releasedBlobs } = await applyPush(store, userId, body.ops, now());
-    if (releasedBlobs.length > 0) {
-      // Destroyed later by the maintenance cron; serverless functions may freeze after responding.
-      await store.c.objects.updateMany({ _id: { $in: releasedBlobs }, userId }, { $set: { status: 'delete_pending', updatedAt: new Date(now()) } });
-    }
+    const { results } = await applyPush(store, userId, body.ops, now());
     await store.c.devices.updateOne({ _id: deviceId }, { $set: { lastSyncAt: new Date(now()) } });
     const out: PushResponse = { results };
     res.json(out);

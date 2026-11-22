@@ -189,6 +189,41 @@ describe('storage + maintenance', () => {
     h.clock.now -= 31 * 86_400_000;
   });
 
+  it('destroys uploads no item ever referenced, keeps attached ones, and makes a late push re-upload', async () => {
+    const d = await signIn(h, 'olga');
+    const upload = async (itemId: string): Promise<string> => {
+      const { key } = (await request(h.app).post('/v1/storage/upload-signature').set(...bearer(d)).send({ itemId, size: 10 })).body;
+      const upload = { public_id: key, version: 1, signature: signParams({ public_id: key, version: 1 }, 'cloud-secret'), bytes: 10 };
+      expect((await request(h.app).post('/v1/storage/confirm').set(...bearer(d)).send({ key, upload })).status).toBe(204);
+      return key;
+    };
+    const blobItem = (key: string, base = encryptedItem()) => {
+      const { body: _body, ...rest } = base;
+      return { ...rest, blob: { key, size: 10 } };
+    };
+
+    const kept = encryptedItem();
+    const keptKey = await upload(kept.id);
+    expect((await push(d, [upsert(blobItem(keptKey, kept))])).body.results[0]).toMatchObject({ status: 'applied' });
+    expect((await h.store.c.objects.findOne({ _id: keptKey }))?.status).toBe('attached');
+
+    // Uploaded, then the item was deleted locally before its first push: nothing references it.
+    const lost = encryptedItem();
+    const lostKey = await upload(lost.id);
+
+    h.clock.now += 4 * 86_400_000;
+    const gc = await request(h.app).get('/v1/internal/gc').set('authorization', `Bearer ${'c'.repeat(20)}`);
+    expect(gc.body.orphansReleased).toBeGreaterThanOrEqual(1);
+    expect(await h.store.c.objects.findOne({ _id: lostKey })).toBeNull();
+    expect((await h.store.c.objects.findOne({ _id: keptKey }))?.status).toBe('attached');
+
+    // The device comes back online and pushes anyway: rejected, so the client re-uploads.
+    const refreshed = await request(h.app).post('/v1/auth/refresh').send({ refreshToken: d.refresh });
+    const late = await request(h.app).post('/v1/sync/push').set('authorization', `Bearer ${refreshed.body.accessToken}`).send({ ops: [upsert(blobItem(lostKey, lost))] });
+    expect(late.body.results[0]).toMatchObject({ status: 'rejected', reason: 'blob_not_uploaded' });
+    h.clock.now -= 4 * 86_400_000;
+  });
+
   it('matches Cloudinary’s documented signature example', () => {
     expect(signParams({ eager: 'w_400,h_300,c_pad|w_260,h_200,c_crop', public_id: 'sample_image', timestamp: 1315060510 }, 'abcd'))
       .toBe('bfd09f95f331f558cbd1320e67aa8d488770583e');

@@ -35,6 +35,15 @@ export async function applyPush(store: Store, userId: string, ops: PushOp[], now
       await store.c.syncEvents.insertOne({ _id: eventId, result, createdAt: new Date(now) }, { session });
       results.push(result);
     }
+    if (releasedBlobs.length > 0) {
+      // Same transaction as the delete/replace, so a released blob can never be left looking live.
+      // The cron destroys it; serverless functions may freeze after responding.
+      await store.c.objects.updateMany(
+        { _id: { $in: releasedBlobs }, userId },
+        { $set: { status: 'delete_pending', updatedAt: new Date(now) } },
+        { session },
+      );
+    }
     return { results, releasedBlobs };
   });
 }
@@ -76,8 +85,14 @@ async function applyOne(
   }
   const blob = op.item.blob;
   if (blob) {
-    const obj = await store.c.objects.findOne({ _id: blob.key, userId, itemId, status: 'uploaded' }, { session });
-    if (!obj) return { opId: op.opId, status: 'rejected', reason: 'blob_not_uploaded' };
+    // Conditional write rather than a read: if the GC has just released this blob as an orphan, the
+    // filter misses and the client re-uploads; otherwise the GC's own `status: 'uploaded'` filter misses.
+    const attached = await store.c.objects.updateOne(
+      { _id: blob.key, userId, itemId, status: { $in: ['uploaded', 'attached'] } },
+      { $set: { status: 'attached', updatedAt: new Date(now) } },
+      { session },
+    );
+    if (attached.matchedCount === 0) return { opId: op.opId, status: 'rejected', reason: 'blob_not_uploaded' };
   }
   const oldBlob = current?.item?.blob?.key;
   if (oldBlob && oldBlob !== blob?.key) releasedBlobs.push(oldBlob);

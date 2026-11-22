@@ -39,7 +39,7 @@ Device authorization: the account's **first** device is authorized at sign-in; e
 | `sessions` | `tokenHash` unique, `previousHash`, TTL `expiresAt` | SHA-256 of refresh tokens only |
 | `clipboard_items` | `_id` = `userId:itemId`; `{userId, seq}`; `{deleted, updatedAt}` | latest state + tombstones |
 | `sync_events` | `_id` = `userId:opId`; TTL 7 days | push idempotency |
-| `encrypted_objects` | `_id` = Cloudinary public_id; `{userId,itemId}`; `{status,updatedAt}` | `pending` → `uploaded` → `delete_pending` |
+| `encrypted_objects` | `_id` = Cloudinary public_id; `{userId,itemId}`; `{status,updatedAt}` | `pending` → `uploaded` → `attached` (an item references it) → `delete_pending` |
 | `rate_limits` | TTL `expiresAt` | fixed windows |
 
 `device_key_envelopes` arrives with Phase 4.
@@ -60,4 +60,4 @@ Server-chosen public ids `clipply/<userId>/<itemId>/<random>`, `type=private`, `
 
 ## Maintenance (`/internal/gc`, daily)
 
-Destroys `delete_pending` blobs and uploads abandoned for > 24 h; purges tombstones older than 30 days after raising the user's `purgeFloor`, so a device with an older cursor gets `410` and resyncs instead of silently missing a delete.
+Releases orphaned uploads (confirmed but never attached to an item after 3 days, e.g. the item was deleted or edited before its first push; a late push gets `blob_not_uploaded` and the client re-uploads), destroys `delete_pending` blobs and uploads abandoned for > 24 h on Cloudinary (5 in parallel, failures retried next run), and purges tombstones older than 30 days after raising the user's `purgeFloor`, so a device with an older cursor gets `410` and resyncs instead of silently missing a delete. Works in batches for up to ~20 s per run (function limit 30 s); leftovers carry over to the next day.

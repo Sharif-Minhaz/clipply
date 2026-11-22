@@ -61,7 +61,9 @@ export interface ObjectDoc {
   userId: string;
   itemId: string;
   size: number;
-  status: 'pending' | 'uploaded' | 'delete_pending';
+  /** pending → uploaded (confirmed) → attached (an item references it) → delete_pending (released).
+   * An `uploaded` object that never gets attached is an orphan and is swept by the GC. */
+  status: 'pending' | 'uploaded' | 'attached' | 'delete_pending';
   createdAt: Date;
   updatedAt: Date;
 }
