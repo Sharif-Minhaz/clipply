@@ -31,6 +31,8 @@ npx vercel env add …        # every variable from .env.example, for Production
 npx vercel deploy --prebuilt --prod
 ```
 
+**Or Git integration** (deploy on push): import the repo in Vercel with **Root Directory = `apps/server`**, keep "Include files outside the root directory" on, and leave Framework / Build / Install settings to `apps/server/vercel.json` (install at the monorepo root, `npm run build` writes `.vercel/output`, which Vercel deploys as-is). Without that file Vercel auto-detects a framework and runs the unbundled TypeScript, which fails with `FUNCTION_INVOCATION_FAILED` on every path. Add every variable from `.env.example` under Settings → Environment Variables, then redeploy.
+
 `JWT_SECRET`: `openssl rand -base64 48`. `CRON_SECRET`: `openssl rand -hex 24` (Vercel sends it to the daily cron at `/v1/internal/gc`).
 
 ## 5. First-deploy checklist (things only a live account can prove)
