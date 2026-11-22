@@ -120,10 +120,20 @@ function Enrollment({ account }: { account: AccountClient }) {
 
   return (
     <Card>
-      <h2 className="font-medium">Connect this device to your encrypted history</h2>
-      <div role="tablist" className="flex gap-2 text-sm">
-        <Button tone={mode === 'device' ? 'primary' : 'plain'} onClick={() => setMode('device')}>Approve from another device</Button>
-        <Button tone={mode === 'recovery' ? 'primary' : 'plain'} onClick={() => setMode('recovery')}>Use recovery key</Button>
+      <h2 className="text-base font-bold">Connect this device to your encrypted history</h2>
+      <div role="radiogroup" aria-label="How to connect" className="grid grid-cols-2 rounded-lg border border-line bg-surface p-0.5">
+        {([['device', 'Another device'], ['recovery', 'Recovery key']] as const).map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={mode === m}
+            onClick={() => setMode(m)}
+            className={`rounded-md px-3 py-2 text-sm whitespace-nowrap ${mode === m ? 'bg-raised font-semibold text-ink shadow-sm' : 'text-muted'}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       {mode === 'device' ? (
         pending ? (
@@ -136,7 +146,7 @@ function Enrollment({ account }: { account: AccountClient }) {
             </Button>
           </div>
         ) : (
-          <p className="text-sm text-muted">On a device that is already connected, open Devices and choose “Approve” next to this device. Waiting…</p>
+          <p className="text-sm text-muted">On a device that is already connected, open Devices and tap Approve next to this one. Waiting for it…</p>
         )
       ) : (
         <div className="space-y-2">
@@ -168,26 +178,36 @@ function DeviceRow(props: { device: DeviceInfo; account: AccountClient; onChange
   };
 
   return (
-    <li className="space-y-2 rounded-lg border border-line p-3">
-      <div className="flex items-center gap-3">
-        <Icon aria-hidden className="size-5 text-muted" />
-        <div className="min-w-0 flex-1">
+    <li className="space-y-3 rounded-lg border border-line p-3.5">
+      <div className="flex items-start gap-3">
+        <Icon aria-hidden className="mt-0.5 size-5 shrink-0 text-muted" />
+        <div className="min-w-0 flex-1 space-y-0.5">
           {renaming ? (
-            <input aria-label="Device name" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded border border-line bg-surface px-2 py-0.5 text-sm" />
+            <div className="flex gap-2">
+              <input aria-label="Device name" value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm" />
+              <Button onClick={() => { setRenaming(false); run(() => account.rename(device.id, name))(); }}>Save</Button>
+            </div>
           ) : (
-            <div className="truncate text-sm font-medium">{device.name}{device.isThisDevice && <span className="ml-2 text-xs text-accent">this device</span>}</div>
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-base font-semibold break-words">{device.name}</span>
+              {device.isThisDevice && <span className="shrink-0 rounded bg-clip/15 px-1.5 py-0.5 text-xs font-semibold text-accent">This device</span>}
+            </div>
           )}
-          <div className="text-xs text-muted">
+          <p className={`text-sm ${device.status === 'pending' ? 'font-semibold text-accent' : device.status === 'revoked' ? 'text-danger' : 'text-muted'}`}>
             {device.status === 'pending' ? 'Waiting for approval' : device.status === 'revoked' ? 'Removed' : 'Connected'}
-            {' · '}last seen {formatRelative(device.lastSeenAt, Date.now())}
-            {device.lastSyncAt !== undefined && <> · synced {formatRelative(device.lastSyncAt, Date.now())}</>}
-          </div>
+          </p>
+          <p className="text-xs text-muted">
+            Last seen {formatRelative(device.lastSeenAt, Date.now())}
+            {device.lastSyncAt !== undefined && <>, synced {formatRelative(device.lastSyncAt, Date.now())}</>}
+          </p>
         </div>
-        {renaming ? (
-          <Button onClick={() => { setRenaming(false); run(() => account.rename(device.id, name))(); }}>Save</Button>
-        ) : (
-          device.status !== 'revoked' && <button type="button" aria-label={`Rename ${device.name}`} onClick={() => setRenaming(true)} className="text-muted hover:text-ink"><Pencil aria-hidden className="size-4" /></button>
+        {!renaming && device.status !== 'revoked' && (
+          <button type="button" aria-label={`Rename ${device.name}`} onClick={() => setRenaming(true)} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-ink">
+            <Pencil aria-hidden className="size-4" />
+          </button>
         )}
+      </div>
+      <div className="flex flex-wrap gap-2 pl-8 empty:hidden">
         {canManage && device.status === 'pending' && !code && (
           <Button tone="primary" onClick={() => void account.startApproval(device.id).then((r) => setCode(r.code), (e: unknown) => setError(message(e)))}>Approve</Button>
         )}
@@ -206,16 +226,48 @@ function DeviceRow(props: { device: DeviceInfo; account: AccountClient; onChange
         <div className="space-y-2 rounded-md bg-surface p-3">
           <p className="text-sm text-muted">Check that {device.name} shows the same code:</p>
           <Code code={code} />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button tone="primary" onClick={() => { setCode(null); run(() => account.confirmApproval(device.id))(); }}>
-              <ShieldCheck aria-hidden className="size-4" /> Codes match — approve
+              <ShieldCheck aria-hidden className="size-4" /> Codes match, approve
             </Button>
             <Button onClick={() => setCode(null)}>Cancel</Button>
           </div>
         </div>
       )}
-      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     </li>
+  );
+}
+
+function syncLabel(status: AccountStatus): string {
+  const s = status.sync;
+  if (s.state === 'paused') return 'Sync paused on this device';
+  if (s.state === 'syncing') return 'Syncing…';
+  if (s.state === 'offline') return 'Offline. Clipply will retry.';
+  if (s.state === 'error') return `Sync problem: ${s.error ?? 'unknown'}`;
+  return s.lastSyncAt ? `Synced ${formatRelative(s.lastSyncAt, Date.now())}` : 'Not synced yet';
+}
+
+/**
+ * Sync button for the history screens. Mounting it syncs too, so opening the history page always
+ * fetches what other devices sent. Hidden when this device is not syncing.
+ */
+export function SyncButton({ account }: { account: AccountClient }) {
+  const status = useAccountStatus(account);
+  useEffect(() => void account.syncNow().catch(() => undefined), [account]);
+  if (!status?.signedIn || status.vault !== 'ready' || status.sync.state === 'paused') return null;
+  const syncing = status.sync.state === 'syncing';
+  return (
+    <button
+      type="button"
+      onClick={() => void account.syncNow()}
+      disabled={syncing}
+      title={syncLabel(status)}
+      aria-label={syncing ? 'Syncing' : `Sync now. ${syncLabel(status)}`}
+      className="flex size-[46px] shrink-0 items-center justify-center rounded-lg bg-raised text-ink shadow-[0_1px_0_rgb(0_0_0/0.12)] hover:text-accent disabled:opacity-80"
+    >
+      <RefreshCw aria-hidden className={`size-5 ${syncing ? 'animate-spin' : ''} ${status.sync.state === 'error' || status.sync.state === 'offline' ? 'text-danger' : ''}`} />
+    </button>
   );
 }
 
@@ -251,7 +303,7 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
       {recoveryKey && <RecoveryKeyNotice recoveryKey={recoveryKey.key} replaced={recoveryKey.replaced} onDone={() => setRecoveryKey(null)} />}
       {!status.signedIn ? (
         <Card>
-          <h2 className="font-medium">Sync your clipboard across devices</h2>
+          <h2 className="text-base font-bold">Sync your clipboard across devices</h2>
           <p className="text-sm text-muted">
             Sign in with Google to connect your devices. Your clipboard is end-to-end encrypted: Google and the Clipply server only ever see ciphertext.
           </p>
@@ -260,18 +312,14 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
         </Card>
       ) : (
         <Card>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="font-medium">{status.email}</span>
-            <span className="ml-auto text-xs text-muted">
-              {status.sync.state === 'paused' ? 'Sync paused on this device'
-                : status.sync.state === 'syncing' ? 'Syncing…'
-                : status.sync.state === 'offline' ? 'Offline — will retry'
-                : status.sync.state === 'error' ? `Sync problem: ${status.sync.error ?? 'unknown'}`
-                : status.sync.lastSyncAt ? `Synced ${formatRelative(status.sync.lastSyncAt, Date.now())}` : ''}
-              {status.sync.pending > 0 && ` · ${status.sync.pending} waiting to upload`}
-            </span>
+          <div className="min-w-0">
+            <p className="text-base font-semibold break-all">{status.email}</p>
+            <p className={`text-sm ${status.sync.state === 'error' ? 'text-danger' : 'text-muted'}`}>
+              {syncLabel(status)}
+              {status.sync.pending > 0 && `. ${status.sync.pending} waiting to upload`}
+            </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {ready && !paused && <Button onClick={() => void account.syncNow()}><RefreshCw aria-hidden className="size-4" /> Sync now</Button>}
             {ready && (
               <Button onClick={() => void account.setSyncPaused(!paused).catch((e: unknown) => setError(message(e)))}>
@@ -288,8 +336,8 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
       )}
       {status.signedIn && devices && (
         <Card>
-          <h2 className="font-medium">Devices</h2>
-          <ul className="space-y-2">
+          <h2 className="text-base font-bold">Devices</h2>
+          <ul className="space-y-2.5">
             {devices.map((d) => (
               <DeviceRow key={d.id} device={d} account={account} canManage={ready} onChanged={loadDevices} onRecoveryKey={(key) => setRecoveryKey({ key, replaced: true })} />
             ))}
@@ -299,7 +347,7 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
       )}
       {ready && (
         <Card>
-          <h2 className="font-medium">Recovery key</h2>
+          <h2 className="text-base font-bold">Recovery key</h2>
           <p className="text-sm text-muted">Lost it, or someone else may have seen it? Replace it. The old key stops working and the encryption key is rotated.</p>
           <Button
             disabled={busy}

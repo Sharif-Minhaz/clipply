@@ -23,7 +23,7 @@ export function SearchBar({ value, onChange, inputRef }: { value: string; onChan
         ref={inputRef}
         type="search"
         aria-label="Search clipboard history"
-        placeholder="Search everything you copied"
+        placeholder="Search your clips"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full bg-transparent text-base text-ink placeholder:text-muted focus:outline-none"
@@ -61,10 +61,18 @@ export function KindFilter({ value, onChange }: { value: readonly ClipKind[]; on
 }
 
 /** The teal clip at the top of the page: search and type filters. Sticks while the list scrolls. */
-export function SearchStrip(props: { query: string; onQuery: (v: string) => void; kinds: readonly ClipKind[]; onKinds: (v: ClipKind[]) => void; inputRef?: React.Ref<HTMLInputElement> }) {
+export function SearchStrip(props: {
+  query: string; onQuery: (v: string) => void; kinds: readonly ClipKind[]; onKinds: (v: ClipKind[]) => void;
+  inputRef?: React.Ref<HTMLInputElement>;
+  /** Shown beside the search field (the sync button). */
+  action?: React.ReactNode;
+}) {
   return (
     <div className="sticky top-0 z-10 space-y-2.5 rounded-b-2xl bg-strip px-4 pt-4 pb-3">
-      <SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} />
+      <div className="flex gap-2">
+        <div className="min-w-0 flex-1"><SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} /></div>
+        {props.action}
+      </div>
       <KindFilter value={props.kinds} onChange={props.onKinds} />
     </div>
   );

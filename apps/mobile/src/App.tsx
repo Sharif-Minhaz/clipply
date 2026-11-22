@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ClipboardPaste, Clipboard, Laptop, Pin, Settings as SettingsIcon, Star } from 'lucide-react';
-import { ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip } from '@clipply/ui';
+import { ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip, SyncButton } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -80,7 +80,7 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
 
   return (
     <div className="space-y-3 px-3 pb-24">
-      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} />
+      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} action={<SyncButton account={rt.account} />} />
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} />
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (

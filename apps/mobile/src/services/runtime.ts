@@ -139,8 +139,10 @@ export async function boot(): Promise<Runtime> {
       await library.capture({ type: 'file', mime: entry.mime, data, name: entry.name ?? 'file' });
       return;
     }
-    const decoded = await decodeImage(data, entry.mime);
-    if (decoded) await library.capture({ type: 'image', mime: entry.mime, data, thumb: decoded.thumb, pixels: decoded.pixels });
+    // An image the WebView cannot decode (e.g. HEIC) is still kept, just without a thumbnail.
+    const decoded = await decodeImage(data, entry.mime).catch(() => null);
+    if (!decoded) log.warn('image kept without thumbnail', { mime: entry.mime });
+    await library.capture({ type: 'image', mime: entry.mime, data, ...(decoded ? { thumb: decoded.thumb, pixels: decoded.pixels } : {}) });
   };
 
   const drainInbox = async (): Promise<void> => {
@@ -159,7 +161,10 @@ export async function boot(): Promise<Runtime> {
     if (clip.type === 'sensitive') return 'Skipped: the clipboard holds sensitive content.';
     if (clip.type === 'none') return 'The clipboard is empty.';
     if (clip.type === 'text' && clip.text) await capture({ type: 'text', mime: 'text/plain', data: '', text: clip.text });
-    if (clip.type === 'image' && clip.data && clip.mime) await capture({ type: 'image', mime: clip.mime, data: clip.data });
+    if (clip.type === 'image' && clip.data && clip.mime) {
+      await capture({ type: 'image', mime: clip.mime, data: clip.data });
+      return 'Image saved.';
+    }
     return 'Saved.';
   };
 
@@ -170,7 +175,11 @@ export async function boot(): Promise<Runtime> {
   await ClipplyNative.addListener('inbox', () => void drainInbox());
   await CapApp.addListener('resume', () => {
     void drainInbox().then(() => account.sync());
+    account.startScheduler();
   });
+  // Check for other devices' clips every minute only while Clipply is on screen; nothing runs in the background.
+  await CapApp.addListener('pause', () => account.stopScheduler());
+  account.startScheduler();
   library.subscribe(() => account.notifyLocalChange());
   await drainInbox();
   if (settings.retentionDays > 0) await library.applyRetention(settings.retentionDays * 86_400_000);

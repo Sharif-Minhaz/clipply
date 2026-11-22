@@ -9,11 +9,21 @@ import type { SecretStorage } from '../vault';
 export const uploadBlob: BlobUploader = async (uploadUrl, fields, ciphertext) => {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
-  form.append('file', new Blob([ciphertext as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }), 'blob.bin');
+  form.append('file', new Blob([ciphertext as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }), 'clip');
   const res = await fetch(uploadUrl, { method: 'POST', body: form, signal: AbortSignal.timeout(120_000) });
-  if (!res.ok) throw new Error(`blob upload failed (${res.status})`);
+  if (!res.ok) throw new Error(`blob upload failed (${res.status}): ${await cloudinaryError(res)}`);
   return z.object({ public_id: z.string(), version: z.number(), signature: z.string(), bytes: z.number() }).parse(await res.json());
 };
+
+/** Cloudinary explains rejections in `{ error: { message } }`; it never contains the (encrypted) content. */
+async function cloudinaryError(res: Response): Promise<string> {
+  const text = await res.text().catch(() => '');
+  try {
+    return (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? text.slice(0, 300);
+  } catch {
+    return text.slice(0, 300);
+  }
+}
 
 export const downloadBlob: BlobDownloader = async (url) => {
   const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });

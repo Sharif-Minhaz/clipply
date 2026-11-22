@@ -80,7 +80,6 @@ export class AccountController {
   private readonly listeners = new Set<() => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private debounce: ReturnType<typeof setTimeout> | null = null;
-  private lastActivity = 0;
   private paused = false;
   private readonly now: () => number;
 
@@ -319,18 +318,13 @@ export class AccountController {
   }
 
   /**
-   * Desktop scheduling: a cheap head probe every `intervalMs` (backing off to 5 min after 30 min
-   * without local activity) plus a debounced sync after local changes. Android does not call this.
+   * A cheap probe (vault version + sync head, no item transfer when nothing changed) every
+   * `intervalMs`, plus a debounced sync after local changes. Desktop runs it always; Android only
+   * while the app is on screen.
    */
   startScheduler(intervalMs = 60_000): void {
     this.stopScheduler();
-    let lastProbe = 0;
-    this.timer = setInterval(() => {
-      const idle = this.now() - this.lastActivity > 30 * 60_000;
-      if (this.now() - lastProbe < (idle ? 5 * 60_000 : intervalMs)) return;
-      lastProbe = this.now();
-      void this.probe();
-    }, Math.min(intervalMs, 15_000));
+    this.timer = setInterval(() => void this.probe(), intervalMs);
   }
 
   stopScheduler(): void {
@@ -342,7 +336,6 @@ export class AccountController {
 
   /** Call after any local change (capture, edit, delete); pushes ~2 s later. */
   notifyLocalChange(): void {
-    this.lastActivity = this.now();
     if (!this.canSync()) return;
     if (this.debounce) clearTimeout(this.debounce);
     this.debounce = setTimeout(() => void this.sync(), 2_000);

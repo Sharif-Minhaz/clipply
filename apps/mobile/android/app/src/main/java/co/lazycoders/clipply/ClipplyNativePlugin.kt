@@ -148,7 +148,7 @@ class ClipplyNativePlugin : Plugin() {
         for (k in fields.keys()) {
             body.write("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n${fields.getString(k)}\r\n".toByteArray())
         }
-        body.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"blob.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray())
+        body.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"clip\"\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray())
         body.write(Base64.decode(call.getString("data")!!, Base64.NO_WRAP))
         body.write("\r\n--$boundary--\r\n".toByteArray())
         val c = URL(call.getString("url")!!).openConnection() as HttpURLConnection
@@ -158,7 +158,12 @@ class ClipplyNativePlugin : Plugin() {
         c.readTimeout = 120_000
         c.setRequestProperty("content-type", "multipart/form-data; boundary=$boundary")
         c.outputStream.use { it.write(body.toByteArray()) }
-        if (c.responseCode !in 200..299) throw java.io.IOException("blob upload failed (${c.responseCode})")
+        if (c.responseCode !in 200..299) {
+            // Cloudinary explains rejections in {"error":{"message":…}}; it never contains clip content.
+            val body = c.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val reason = runCatching { org.json.JSONObject(body).getJSONObject("error").getString("message") }.getOrDefault(body.take(300))
+            throw java.io.IOException("blob upload failed (${c.responseCode}): $reason")
+        }
         call.resolve(JSObject().put("json", c.inputStream.bufferedReader().use { it.readText() }))
     }
 

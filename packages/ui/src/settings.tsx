@@ -32,7 +32,7 @@ export function SwitchRow({ label, hint, checked, onChange }: { label: string; h
 
 /** Secondary button used across settings and account screens. */
 export const buttonClass = {
-  plain: 'inline-flex items-center gap-2 rounded-lg border border-line bg-raised px-3.5 py-2 text-sm font-semibold text-ink hover:border-muted disabled:opacity-50',
-  primary: 'inline-flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-raised hover:opacity-90 disabled:opacity-50',
-  danger: 'inline-flex items-center gap-2 rounded-lg border border-danger/40 px-3.5 py-2 text-sm font-semibold text-danger hover:bg-danger/10 disabled:opacity-50',
+  plain: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-lg whitespace-nowrap border border-line bg-raised px-3.5 py-2 text-sm font-semibold text-ink hover:border-muted disabled:opacity-50',
+  primary: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-lg whitespace-nowrap bg-accent px-3.5 py-2 text-sm font-semibold text-raised hover:opacity-90 disabled:opacity-50',
+  danger: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-lg whitespace-nowrap border border-danger/40 px-3.5 py-2 text-sm font-semibold text-danger hover:bg-danger/10 disabled:opacity-50',
 };

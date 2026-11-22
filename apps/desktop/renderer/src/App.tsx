@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import logo from './logo.png';
 import { Clipboard, Laptop, Pause, Pin, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { ClipList, ItemViewer, SearchStrip } from '@clipply/ui';
+import { ClipList, ItemViewer, SearchStrip, SyncButton } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -110,7 +110,7 @@ function HistoryScreen({ base, empty }: { base: ListFilter; empty: string }) {
   const filter: ListFilter = { ...base, ...(query ? { query } : {}), ...(kinds.length ? { kinds } : {}) };
   return (
     <div className="mx-auto max-w-3xl space-y-3 px-6 pb-8">
-      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} />
+      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} action={<SyncButton account={window.clipply.account} />} />
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} deviceNames={{}} />
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
     </div>

@@ -69,7 +69,7 @@ describe('DevicesPanel', () => {
     await user.click(await screen.findByRole('button', { name: 'Approve' }));
     expect(await screen.findByLabelText('Code 1111 2222 3333')).toBeTruthy();
     expect(client.confirmApproval).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: /Codes match — approve/ }));
+    await user.click(screen.getByRole('button', { name: /Codes match, approve/ }));
     await waitFor(() => expect(client.confirmApproval).toHaveBeenCalledWith('new'));
     expect(screen.getByText(/Online status is not shown/)).toBeTruthy();
   });
