@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ClipboardPaste, Clipboard, Laptop, Pin, Settings as SettingsIcon, Star } from 'lucide-react';
-import { ClipList, ClipplyProvider, DevicesPanel, ItemViewer, KindFilter, SearchBar } from '@clipply/ui';
+import { ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -41,22 +41,23 @@ function Shell({ rt }: { rt: Runtime }) {
   return (
     <div className="flex h-dvh flex-col bg-surface pt-[env(safe-area-inset-top)] text-ink">
       <main className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'clipboard' && <History rt={rt} base={{}} empty="Nothing saved yet. Tap “Save clipboard”, share text or images to Clipply, or use the Quick Settings tile." />}
-        {tab === 'favorites' && <History rt={rt} base={{ favorite: true }} empty="No favorites yet." />}
-        {tab === 'pinned' && <History rt={rt} base={{ pinned: true }} empty="No pinned items yet." />}
-        {tab === 'devices' && <div className="space-y-4 p-4"><h1 className="text-lg font-semibold">Devices</h1><DevicesPanel account={rt.account} /></div>}
+        {tab === 'clipboard' && <History rt={rt} base={{}} empty="Nothing saved yet. Tap Save clipboard, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
+        {tab === 'favorites' && <History rt={rt} base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
+        {tab === 'pinned' && <History rt={rt} base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
+        {tab === 'devices' && <div className="space-y-4 px-4 py-6"><h1 className="text-2xl font-bold tracking-tight">Devices</h1><DevicesPanel account={rt.account} /></div>}
         {tab === 'settings' && <SettingsScreen rt={rt} />}
       </main>
-      <nav aria-label="Main" className="grid grid-cols-5 border-t border-line bg-raised pb-[env(safe-area-inset-bottom)]">
+      <nav aria-label="Main" className="grid grid-cols-5 bg-frame pb-[env(safe-area-inset-bottom)] text-frame-muted">
         {TABS.map(({ tab: t, label, icon: Icon }) => (
           <button
             key={t}
             type="button"
             aria-current={tab === t ? 'page' : undefined}
             onClick={() => setTab(t)}
-            className={`flex flex-col items-center gap-0.5 py-2 text-[11px] ${tab === t ? 'text-accent' : 'text-muted'}`}
+            className={`relative flex flex-col items-center gap-1 pt-2.5 pb-2 text-xs ${tab === t ? 'font-semibold text-frame-ink' : ''}`}
           >
-            <Icon aria-hidden className="size-5" />
+            {tab === t && <span aria-hidden className="absolute top-0 h-1 w-8 rounded-b bg-clip" />}
+            <Icon aria-hidden className={`size-[22px] ${tab === t ? 'text-clip' : ''}`} />
             {label}
           </button>
         ))}
@@ -78,21 +79,20 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
   };
 
   return (
-    <div className="space-y-3 p-4">
-      <SearchBar value={query} onChange={setQuery} />
-      <KindFilter value={kinds} onChange={setKinds} />
+    <div className="space-y-3 px-3 pb-24">
+      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} />
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} />
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (
         <button
           type="button"
           onClick={saveClipboard}
-          className="fixed right-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] flex items-center gap-2 rounded-full bg-accent px-4 py-3 text-sm font-medium text-surface shadow-lg"
+          className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] flex items-center gap-2 rounded-2xl bg-frame px-5 py-3.5 text-base font-semibold text-frame-ink shadow-lg"
         >
-          <ClipboardPaste aria-hidden className="size-4" /> Save clipboard
+          <ClipboardPaste aria-hidden className="size-5 text-clip" /> Save clipboard
         </button>
       )}
-      {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(8rem+env(safe-area-inset-bottom))] rounded-lg bg-raised p-3 text-center text-sm shadow">{toast}</p>}
+      {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(9rem+env(safe-area-inset-bottom))] rounded-xl bg-frame px-4 py-3 text-center text-sm text-frame-ink shadow-lg">{toast}</p>}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { CloudOff, KeyRound, Laptop, LogOut, Pause, Pencil, Play, RefreshCw, ShieldCheck, Smartphone, Trash } from 'lucide-react';
 import type { AccountStatus, DeviceInfo } from '@clipply/sync-engine';
 
+import { buttonClass } from './settings';
 import { formatRelative } from './time';
 
 /** Platform bridge for account, vault and device management (desktop: IPC; Android: in-WebView). */
@@ -37,7 +38,7 @@ function useAccountStatus(account: AccountClient): AccountStatus | null {
 }
 
 function Card({ children }: { children: ReactNode }) {
-  return <section className="space-y-3 rounded-xl border border-line bg-raised p-4">{children}</section>;
+  return <section className="space-y-3 rounded-xl border border-line bg-raised px-5 py-4">{children}</section>;
 }
 
 function Button(props: { onClick: () => void; children: ReactNode; tone?: 'primary' | 'danger' | 'plain'; disabled?: boolean }) {
@@ -47,9 +48,7 @@ function Button(props: { onClick: () => void; children: ReactNode; tone?: 'prima
       type="button"
       onClick={props.onClick}
       disabled={props.disabled}
-      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors disabled:opacity-50 ${
-        tone === 'primary' ? 'bg-accent text-surface hover:opacity-90' : tone === 'danger' ? 'border border-danger/50 text-danger hover:bg-danger/10' : 'border border-line hover:border-accent'
-      }`}
+      className={buttonClass[tone]}
     >
       {props.children}
     </button>
@@ -62,8 +61,11 @@ function Code({ code }: { code: string }) {
 }
 
 /** Shown once after the vault is created. No copy button: copying would put the key into clipboard history. */
+/** Crockford base32 reads O as 0 and I/L as 1, like the recovery-key parser does. */
+const crockford = (s: string): string => s.toUpperCase().replace(/[\s-]/g, '').replace(/[IL]/g, '1').replace(/O/g, '0');
+
 function RecoveryKeyNotice({ recoveryKey, replaced, onDone }: { recoveryKey: string; replaced: boolean; onDone: () => void }) {
-  const lastGroup = recoveryKey.split('-').at(-1)!;
+  const lastGroup = crockford(recoveryKey.split('-').at(-1)!);
   const [typed, setTyped] = useState('');
   return (
     <div role="dialog" aria-modal="true" aria-label="Your recovery key" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
@@ -78,7 +80,7 @@ function RecoveryKeyNotice({ recoveryKey, replaced, onDone }: { recoveryKey: str
           Type the last group (<span className="text-muted">5 characters</span>) to confirm you saved it
           <input value={typed} onChange={(e) => setTyped(e.target.value)} className="mt-1 w-full rounded-md border border-line bg-raised px-2 py-1 font-mono uppercase" />
         </label>
-        <Button tone="primary" disabled={typed.trim().toUpperCase() !== lastGroup} onClick={onDone}>I saved my recovery key</Button>
+        <Button tone="primary" disabled={crockford(typed) !== lastGroup} onClick={onDone}>I saved my recovery key</Button>
       </div>
     </div>
   );

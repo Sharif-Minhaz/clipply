@@ -86,7 +86,7 @@ describe('shared UI', () => {
     const cards = await screen.findAllByRole('article');
     expect(cards.map((c) => within(c).getByText(/grocery|clipply/).textContent)).toEqual(['https://clipply.dev', 'grocery list']);
     expect(within(cards[0]!).getByText('Link')).toBeTruthy();
-    expect(within(cards[0]!).getByText('2 minutes ago').parentElement?.textContent).toBe('2 minutes ago · Laptop');
+    expect(within(cards[0]!).getByText('2 minutes ago').parentElement?.textContent).toBe('2 minutes ago, from Laptop');
   });
 
   it('searches and filters by kind', async () => {
@@ -101,7 +101,7 @@ describe('shared UI', () => {
     expect(link.getAttribute('aria-pressed')).toBe('true');
     await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
     await user.type(screen.getByLabelText('Search clipboard history'), 'zzz');
-    expect(await screen.findByText('No matches.')).toBeTruthy();
+    expect(await screen.findByText('Nothing matches “zzz”.')).toBeTruthy();
   });
 
   it('pins, copies and deletes through the client and re-renders on change', async () => {
@@ -136,6 +136,20 @@ describe('shared UI', () => {
     await user.click(screen.getByRole('button', { name: 'Select all' }));
     await user.click(screen.getByRole('button', { name: 'Delete selected' }));
     await waitFor(() => expect(lib.list()).toHaveLength(0));
+  });
+
+  it('copies when the card is clicked and opens details with Expand', async () => {
+    const user = userEvent.setup();
+    const copy = vi.fn(async () => {});
+    const onOpen = vi.fn();
+    render(<ClipplyProvider client={lib.client(copy)}><ClipList filter={{}} onOpen={onOpen} /></ClipplyProvider>);
+    const [first] = await screen.findAllByRole('article');
+    await user.click(within(first!).getByRole('button', { name: /^Copy .* item$/ }));
+    expect(copy).toHaveBeenCalledWith(lib.list()[0]!.id);
+    expect(await within(first!).findByText('Copied')).toBeTruthy();
+    expect(onOpen).not.toHaveBeenCalled();
+    await user.click(within(first!).getByRole('button', { name: 'Expand' }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: lib.list()[0]!.id }));
   });
 
   it('opens an item, edits its text and closes on Escape', async () => {

@@ -17,7 +17,7 @@ export function createMainWindow(opts: WindowOptions): BrowserWindow {
     minWidth: 560,
     minHeight: 420,
     show: false,
-    backgroundColor: '#14161c',
+    backgroundColor: '#f3f7f7',
     title: 'Clipply',
     icon: opts.icon,
     autoHideMenuBar: true,

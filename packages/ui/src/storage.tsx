@@ -3,6 +3,7 @@ import type { ClipKind } from '@clipply/shared-schemas';
 import type { StorageStats } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
+import { buttonClass } from './settings';
 import { formatBytes } from './viewer';
 
 const LABEL: Record<ClipKind, string> = { text: 'Text', url: 'Links', html: 'Rich text', code: 'Code', image: 'Images', file: 'Files' };
@@ -30,15 +31,15 @@ export function StoragePanel() {
   return (
     <div className="space-y-2 text-sm">
       <p>
-        {stats.count} item{stats.count === 1 ? '' : 's'} · {formatBytes(stats.bytes)}
-        {stats.kept > 0 && <span className="text-muted"> · {stats.kept} pinned or favorite</span>}
+        <span className="font-semibold">{stats.count} clip{stats.count === 1 ? '' : 's'}</span>, {formatBytes(stats.bytes)} on this device
+        {stats.kept > 0 && <span className="text-muted">. {stats.kept} pinned or favorite.</span>}
       </p>
       <ul className="space-y-1">
         {kinds.map((k) => (
           <li key={k} className="flex items-center gap-2">
             <span className="flex-1">{LABEL[k]}</span>
-            <span className="text-xs text-muted">{stats.byKind[k]!.count} · {formatBytes(stats.byKind[k]!.bytes)}</span>
-            <button type="button" aria-label={`Clear ${LABEL[k]}`} onClick={() => clear([k], `all ${LABEL[k].toLowerCase()}`)} className="text-xs text-danger hover:underline">
+            <span className="text-sm text-muted tabular-nums">{stats.byKind[k]!.count} clips, {formatBytes(stats.byKind[k]!.bytes)}</span>
+            <button type="button" aria-label={`Clear ${LABEL[k]}`} onClick={() => clear([k], `all ${LABEL[k].toLowerCase()}`)} className="rounded-md px-2 py-0.5 text-sm text-danger hover:bg-danger/10">
               Clear
             </button>
           </li>
@@ -48,7 +49,7 @@ export function StoragePanel() {
         type="button"
         disabled={stats.count === stats.kept}
         onClick={() => clear(undefined, 'all history')}
-        className="rounded-md border border-danger/50 px-3 py-1.5 text-sm text-danger hover:bg-danger/10 disabled:opacity-50"
+        className={buttonClass.danger}
       >
         Clear history
       </button>
@@ -83,7 +84,7 @@ export function BackupPanel({ actions }: { actions: BackupActions }) {
     }, (e: unknown) => setNote(e instanceof Error ? e.message.replace(/^\w*Error: /, '') : String(e))).finally(() => setBusy(false));
   };
   const long = passphrase.length >= MIN_PASSPHRASE;
-  const input = 'w-full rounded-md border border-line bg-raised px-2 py-1 text-sm';
+  const input = 'w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm';
 
   return (
     <div className="space-y-2 text-sm">
@@ -100,7 +101,7 @@ export function BackupPanel({ actions }: { actions: BackupActions }) {
             const r = await actions.exportBackup(passphrase);
             return r && `Exported ${r.count} items${r.skipped ? ` (${r.skipped} not available offline were skipped)` : ''}.`;
           })}
-          className="rounded-md border border-line px-3 py-1.5 hover:border-accent disabled:opacity-50"
+          className={buttonClass.plain}
         >
           Export…
         </button>
@@ -111,7 +112,7 @@ export function BackupPanel({ actions }: { actions: BackupActions }) {
             const r = await actions.importBackup(passphrase);
             return r && `Imported ${r.imported} items; ${r.duplicates} were already here${r.failed ? `; ${r.failed} could not be read` : ''}.`;
           })}
-          className="rounded-md border border-line px-3 py-1.5 hover:border-accent disabled:opacity-50"
+          className={buttonClass.plain}
         >
           Import…
         </button>

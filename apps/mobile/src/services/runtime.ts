@@ -109,7 +109,8 @@ export async function boot(): Promise<Runtime> {
     googleIdToken: async () => {
       const webClientId = import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID as string | undefined;
       if (!webClientId) throw new Error('Google sign-in is not configured in this build');
-      await SocialLogin.initialize({ google: { webClientId, mode: 'online' } });
+      // Only the ID token is needed (the server verifies it); no Google API access, so skip the scope authorization step.
+      await SocialLogin.initialize({ google: { webClientId, mode: 'online', skipAuthOnlyAuthorizationAfterSignIn: true } });
       const { result } = await SocialLogin.login({ provider: 'google', options: {} });
       if (result.responseType !== 'online' || !result.idToken) throw new Error('Google did not return an account');
       return result.idToken;

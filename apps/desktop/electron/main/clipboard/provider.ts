@@ -84,8 +84,8 @@ export interface ElectronProviderOptions {
 }
 
 /**
- * Polls Electron's clipboard from the main process. On GNOME Wayland this works unfocused only
- * when Electron runs on XWayland (`--ozone-platform=x11`), because Mutter mirrors the Wayland
+ * Polls Electron's clipboard. On GNOME Wayland this works unfocused only when Electron runs on
+ * XWayland (`--ozone-platform=x11`, the clipboard helper process there), because Mutter mirrors the Wayland
  * clipboard into the X selection (measured, docs/desktop.md). A poll reads the type list and the
  * text (a few ms); image bytes are fetched only when the X TIMESTAMP target changes.
  * Plaintext is never kept between polls: change detection compares SHA-256 digests.

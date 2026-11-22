@@ -180,11 +180,28 @@ describe('GNOME shortcut', () => {
     const calls: string[][] = [];
     const run = async (args: string[]): Promise<string> => {
       calls.push(args);
-      return args[0] === 'get' ? "['/other/']" : '';
+      if (args[0] !== 'get') return '';
+      return args[1] === 'org.gnome.shell.keybindings' ? "['<Super>v', '<Super>m']" : "['/other/']";
     };
-    await installGnomeShortcut("'/usr/bin/clipply' --toggle", '<Super><Shift>v', run);
-    expect(calls[1]).toEqual(['set', 'org.gnome.settings-daemon.plugins.media-keys', 'custom-keybindings', `['/other/', '${CLIPPLY_PATH}']`]);
-    expect(calls.at(-1)).toEqual([`set`, `org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CLIPPLY_PATH}`, 'binding', '<Super><Shift>v']);
+    await installGnomeShortcut("'/usr/bin/clipply' --toggle", '<Super>v', run);
+    // Super+V is taken from GNOME's notification list; Super+M keeps it.
+    expect(calls).toContainEqual(['set', 'org.gnome.shell.keybindings', 'toggle-message-tray', "['<Super>m']"]);
+    expect(calls).toContainEqual(['set', 'org.gnome.settings-daemon.plugins.media-keys', 'custom-keybindings', `['/other/', '${CLIPPLY_PATH}']`]);
+    const key = `org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CLIPPLY_PATH}`;
+    // Values are GVariant string literals; a raw command starting with a quote is rejected by gsettings.
+    expect(calls).toContainEqual(['set', key, 'command', "'\\'/usr/bin/clipply\\' --toggle'"]);
+    expect(calls.at(-1)).toEqual(['set', key, 'binding', "'<Super>v'"]);
+  });
+});
+
+describe('GNOME shortcut status', () => {
+  it('counts only a complete install with the current binding', async () => {
+    const { gnomeShortcutInstalled } = await import('./shortcuts/gnome');
+    const state = (command: string, binding: string) => async (args: string[]): Promise<string> =>
+      args[1]!.endsWith('media-keys') ? `['${CLIPPLY_PATH}']` : args[2] === 'command' ? command : binding;
+    expect(await gnomeShortcutInstalled(state("''", "''"))).toBe(false); // left by a failed install
+    expect(await gnomeShortcutInstalled(state("'clipply --toggle'", "'<Super><Shift>v'"))).toBe(false); // old binding
+    expect(await gnomeShortcutInstalled(state("'clipply --toggle'", "'<Super>v'"))).toBe(true);
   });
 });
 

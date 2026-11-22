@@ -11,13 +11,15 @@ import { AccountController, ClipLibrary, uuidv7 } from '@clipply/sync-engine';
 import { CH, type DesktopStatus } from '../shared/api';
 import { setAutostart } from './autostart';
 import { fileSink } from './logFile';
-import { ElectronClipboardProvider, type DecodedImage } from './clipboard/provider';
+import { ElectronClipboardProvider, type ClipboardProvider, type DecodedImage } from './clipboard/provider';
+import { HelperClipboardProvider } from './clipboard/helper';
+import { runClipboardHelper } from './clipboard/helperProcess';
 import { DesktopCore, type ClipboardWrite } from './core';
 import { activeAppClasses } from './clipboard/activeApp';
 import { registerIpc } from './ipc';
 import { defaultScreenshotDir, watchScreenshots } from './screenshot/watcher';
 import type { Settings } from './settings';
-import { gnomeShortcutInstalled, installGnomeShortcut } from './shortcuts/gnome';
+import { GNOME_BINDING, gnomeShortcutInstalled, installGnomeShortcut } from './shortcuts/gnome';
 import { createTray } from './tray/tray';
 import { openVault, writeVault, type VaultState } from './vault';
 import { googleSignIn } from './account/googleOAuth';
@@ -30,20 +32,11 @@ const log = createLogger('main', {
   sink: fileSink(join(app.getPath('userData'), 'logs', 'main.log')),
 });
 const isWaylandSession = process.env.XDG_SESSION_TYPE === 'wayland';
+// The window is a native Wayland client (sharp under fractional scaling); background clipboard reads
+// need XWayland, so on Wayland they run in a helper process (clipboard/helper.ts, docs/desktop.md).
+const useClipboardHelper = process.platform === 'linux' && isWaylandSession && app.commandLine.getSwitchValue('ozone-platform') !== 'x11';
 
-const GLOBAL_SHORTCUT = 'Super+Shift+V';
-
-// Background clipboard reads need Electron on XWayland under GNOME Wayland (docs/desktop.md).
-// app.commandLine.appendSwitch('ozone-platform') is too late at runtime (measured), so a launch
-// without the flag relaunches itself once with it. CLIPPLY_OZONE=wayland opts out for testing.
-// Electron itself injects --ozone-platform=wayland on Wayland sessions, so the value is checked,
-// and CLIPPLY_X11_RELAUNCHED stops a relaunch loop if the flag is ever ignored.
-const needsX11Relaunch =
-  process.platform === 'linux' &&
-  isWaylandSession &&
-  app.commandLine.getSwitchValue('ozone-platform') !== 'x11' &&
-  process.env.CLIPPLY_OZONE !== 'wayland' &&
-  process.env.CLIPPLY_X11_RELAUNCHED !== '1';
+const GLOBAL_SHORTCUT = 'Super+V';
 
 app.setName('Clipply');
 
@@ -56,10 +49,9 @@ const relaunch = (args = process.argv.slice(1)): void => {
   else app.relaunch({ args });
 };
 
-if (needsX11Relaunch) {
-  process.env.CLIPPLY_X11_RELAUNCHED = '1';
-  relaunch([...process.argv.slice(1), '--ozone-platform=x11']);
-  app.exit(0);
+if (process.argv.includes('--clipboard-helper')) {
+  app.disableHardwareAcceleration();
+  void runClipboardHelper();
 } else if (!app.requestSingleInstanceLock()) {
   // A second launch (`clipply --toggle` from a GNOME shortcut) is forwarded to the first instance.
   app.quit();
@@ -101,12 +93,23 @@ async function main(): Promise<void> {
     return { pixels: new Uint8Array(img.toBitmap()), thumb: new Uint8Array(img.resize({ width: Math.min(320, width), quality: 'good' }).toJPEG(80)) };
   };
 
-  const provider = new ElectronClipboardProvider({
-    clipboard,
-    decodeImage,
-    captureImages: () => core?.settings.captureImages ?? false,
-    log: log.child('clipboard'),
-  });
+  const provider: ClipboardProvider = useClipboardHelper
+    ? new HelperClipboardProvider({
+        // execPath (inside the AppImage mount when packaged) lives exactly as long as this process.
+        command: [
+          ...(app.isPackaged ? [process.execPath] : [process.execPath, appRoot]),
+          '--clipboard-helper', '--ozone-platform=x11',
+          ...process.argv.filter((a) => a.startsWith('--user-data-dir=')),
+        ],
+        decodeImage,
+        log: log.child('clipboard'),
+      })
+    : new ElectronClipboardProvider({
+        clipboard,
+        decodeImage,
+        captureImages: () => core?.settings.captureImages ?? false,
+        log: log.child('clipboard'),
+      });
 
   const writeClipboard = async (data: ClipboardWrite): Promise<void> => {
     if ('png' in data) {
@@ -209,7 +212,7 @@ async function main(): Promise<void> {
     core: () => core,
     library: () => library,
     status,
-    installShortcut: () => installGnomeShortcut(`${launchCommand.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')} --toggle`, '<Super><Shift>v'),
+    installShortcut: () => installGnomeShortcut(`${launchCommand.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')} --toggle`, GNOME_BINDING),
     chooseBackupFile: async (mode) => {
       const filters = [{ name: 'Clipply backup', extensions: ['clipply'] }];
       if (mode === 'save') {
@@ -294,6 +297,7 @@ async function main(): Promise<void> {
   });
   app.on('browser-window-focus', () => void account?.sync());
   app.on('will-quit', () => {
+    if (provider instanceof HelperClipboardProvider) provider.dispose();
     account?.stopScheduler();
     globalShortcut.unregisterAll();
     screenshotWatch?.close();

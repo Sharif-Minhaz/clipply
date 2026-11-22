@@ -1,5 +1,5 @@
 import { useState, type ComponentType } from 'react';
-import { CheckSquare, Code, Copy, Download, File, Image, Link, Pin, PinOff, Search, Square, Star, Trash, Type, X, type LucideProps } from 'lucide-react';
+import { Check, CheckSquare, Code, Copy, Download, File, Maximize2, Image, Link, Pin, PinOff, Search, Square, Star, Trash, Type, X, type LucideProps } from 'lucide-react';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -17,21 +17,22 @@ export const KIND_ICON: Record<ClipKind, ComponentType<LucideProps>> = {
 
 export function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v: string) => void; inputRef?: React.Ref<HTMLInputElement> }) {
   return (
-    <label className="flex items-center gap-2 rounded-lg border border-line bg-raised px-3 py-2 focus-within:border-accent">
-      <Search aria-hidden className="size-4 shrink-0 text-muted" />
+    <label className="flex items-center gap-2.5 rounded-lg bg-raised px-3.5 py-2.5 shadow-[0_1px_0_rgb(0_0_0/0.12)] focus-within:outline-2 focus-within:outline-white">
+      <Search aria-hidden className="size-[18px] shrink-0 text-muted" />
       <input
         ref={inputRef}
         type="search"
         aria-label="Search clipboard history"
-        placeholder="Search…"
+        placeholder="Search everything you copied"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-transparent text-sm text-ink placeholder:text-muted focus:outline-none"
+        className="w-full bg-transparent text-base text-ink placeholder:text-muted focus:outline-none"
       />
     </label>
   );
 }
 
+/** The chips sit on the teal strip, so they are white on teal rather than page colors. */
 export function KindFilter({ value, onChange }: { value: readonly ClipKind[]; onChange: (v: ClipKind[]) => void }) {
   const toggle = (kind: ClipKind): void =>
     onChange(value.includes(kind) ? value.filter((k) => k !== kind) : [...value, kind]);
@@ -39,20 +40,32 @@ export function KindFilter({ value, onChange }: { value: readonly ClipKind[]; on
     <div role="group" aria-label="Filter by type" className="flex flex-wrap gap-1.5">
       {(Object.keys(KIND_LABEL) as ClipKind[]).map((kind) => {
         const on = value.includes(kind);
+        const Icon = KIND_ICON[kind];
         return (
           <button
             key={kind}
             type="button"
             aria-pressed={on}
             onClick={() => toggle(kind)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-              on ? 'border-accent bg-accent/15 text-accent' : 'border-line text-muted hover:text-ink'
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm transition-colors ${
+              on ? 'bg-white font-semibold text-strip' : 'font-medium text-white hover:bg-strip-hover'
             }`}
           >
+            <Icon aria-hidden className="size-3.5" />
             {KIND_LABEL[kind]}
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** The teal clip at the top of the page: search and type filters. Sticks while the list scrolls. */
+export function SearchStrip(props: { query: string; onQuery: (v: string) => void; kinds: readonly ClipKind[]; onKinds: (v: ClipKind[]) => void; inputRef?: React.Ref<HTMLInputElement> }) {
+  return (
+    <div className="sticky top-0 z-10 space-y-2.5 rounded-b-2xl bg-strip px-4 pt-4 pb-3">
+      <SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} />
+      <KindFilter value={props.kinds} onChange={props.onKinds} />
     </div>
   );
 }
@@ -73,6 +86,15 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
   const KindIcon = KIND_ICON[meta.kind];
   const thumb = useThumbUrl(item.id, item.hasThumb);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const isFile = meta.kind === 'file';
+  // Files cannot go on the clipboard, so their primary action is Save.
+  const primary = async (): Promise<void> => {
+    if (isFile) return void (await client.saveFile(item.id));
+    await client.copy(item.id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
   const act = (fn: () => Promise<void>) => async (): Promise<void> => {
     setBusy(true);
     try {
@@ -85,51 +107,55 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
   return (
     <article
       aria-label={`${KIND_LABEL[meta.kind]} item`}
-      className={`group rounded-xl border bg-raised p-3 transition-colors hover:border-accent/50 ${selected ? 'border-accent' : 'border-line'}`}
+      className={`group rounded-xl border bg-raised transition-colors ${selected ? 'border-accent ring-2 ring-accent/30' : 'border-line hover:border-muted/50'}`}
     >
-      <header className="mb-2 flex items-center gap-2 text-xs text-muted">
+      <header className="flex items-center gap-2 px-4 pt-3 text-xs text-muted">
         {onSelect && (selected ? <CheckSquare aria-hidden className="size-4 text-accent" /> : <Square aria-hidden className="size-4" />)}
-        <span className="flex items-center gap-1 rounded bg-surface px-1.5 py-0.5 font-medium text-ink">
-          <KindIcon aria-hidden className="size-3.5" />
-          {KIND_LABEL[meta.kind]}
-        </span>
-        {meta.pinned && <Pin aria-label="Pinned" className="size-3.5 text-accent" />}
+        <KindIcon aria-hidden className="size-4" />
+        <span className="font-semibold">{KIND_LABEL[meta.kind]}</span>
+        {meta.pinned && <Pin aria-label="Pinned" className="size-3.5 fill-accent text-accent" />}
         {meta.favorite && <Star aria-label="Favorite" className="size-3.5 fill-accent text-accent" />}
-        {meta.title && <span className="truncate font-medium text-ink">{meta.title}</span>}
+        {meta.title && <span className="truncate font-semibold text-ink">{meta.title}</span>}
         <span className="ml-auto whitespace-nowrap">
-          <time dateTime={new Date(meta.createdAt).toISOString()}>{formatRelative(meta.createdAt, now)}</time>
-          {deviceName && <> · {deviceName}</>}
+          {copied ? (
+            <span role="status" className="flex items-center gap-1 font-semibold text-accent"><Check aria-hidden className="size-4" /> Copied</span>
+          ) : (
+            <>
+              <time dateTime={new Date(meta.createdAt).toISOString()}>{formatRelative(meta.createdAt, now)}</time>
+              {deviceName && <span>, from {deviceName}</span>}
+            </>
+          )}
         </span>
       </header>
 
       <button
         type="button"
-        onClick={() => (onSelect ? onSelect() : onOpen?.(item))}
-        disabled={!onOpen && !onSelect}
+        onClick={onSelect ?? act(primary)}
+        disabled={busy && !onSelect}
         {...(onSelect ? { 'aria-pressed': !!selected } : {})}
-        aria-label={`${onSelect ? 'Select' : 'Open'} ${KIND_LABEL[meta.kind].toLowerCase()} item`}
-        className="block w-full cursor-pointer text-left disabled:cursor-default"
+        title={onSelect ? undefined : isFile ? 'Click to save' : 'Click to copy'}
+        aria-label={`${onSelect ? 'Select' : isFile ? 'Save' : 'Copy'} ${KIND_LABEL[meta.kind].toLowerCase()} item`}
+        className="block w-full cursor-pointer px-4 py-2 text-left disabled:cursor-default"
       >
         {meta.kind === 'image' ? (
           thumb ? (
-            <img src={thumb} alt={meta.title ?? 'Clipboard image'} className="max-h-40 rounded-md object-contain" />
+            <img src={thumb} alt={meta.title ?? 'Clipboard image'} className="max-h-48 rounded-lg border border-line object-contain" />
           ) : (
-            <div className="flex h-24 items-center justify-center rounded-md bg-surface text-xs text-muted">Image</div>
+            <div className="flex h-24 items-center justify-center rounded-lg bg-surface text-sm text-muted">Image</div>
           )
         ) : (
-          <p className={`line-clamp-4 text-sm break-words whitespace-pre-wrap ${meta.kind === 'code' ? 'font-mono text-xs' : ''}`}>
+          <p className={`line-clamp-4 break-words whitespace-pre-wrap text-ink ${meta.kind === 'code' ? 'font-mono text-[0.84rem] leading-relaxed' : 'text-[1.0625rem] leading-relaxed'} ${meta.kind === 'url' ? 'text-accent underline decoration-accent/40 underline-offset-2' : ''}`}>
             {item.preview}
           </p>
         )}
       </button>
 
-      {!onSelect && <footer className="mt-2 flex gap-1 text-xs opacity-70 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-        {meta.kind === 'file'
-          ? <IconButton icon={Download} label="Save" disabled={busy} onClick={act(async () => void (await client.saveFile(item.id)))} />
-          : <IconButton icon={Copy} label="Copy" disabled={busy} onClick={act(() => client.copy(item.id))} />}
+      {!onSelect && <footer className="flex items-center gap-0.5 px-2 pb-2">
+        <IconButton icon={isFile ? Download : Copy} label={isFile ? 'Save' : 'Copy'} disabled={busy} onClick={act(primary)} />
         <IconButton icon={Pin} label={meta.pinned ? 'Unpin' : 'Pin'} pressed={meta.pinned} disabled={busy} onClick={act(() => client.setFlags(item.id, { pinned: !meta.pinned }))} />
         <IconButton icon={Star} label={meta.favorite ? 'Unfavorite' : 'Favorite'} pressed={meta.favorite} disabled={busy} onClick={act(() => client.setFlags(item.id, { favorite: !meta.favorite }))} />
         <IconButton icon={Trash} label="Delete" danger disabled={busy} onClick={act(() => client.remove([item.id]))} />
+        {onOpen && <span className="ml-auto"><IconButton icon={Maximize2} label="Expand" onClick={() => onOpen(item)} /></span>}
       </footer>}
     </article>
   );
@@ -152,11 +178,11 @@ export function IconButton(props: {
       onClick={props.onClick}
       disabled={props.disabled}
       {...(props.pressed !== undefined ? { 'aria-pressed': props.pressed } : {})}
-      className={`flex items-center gap-1 rounded px-2 py-1 transition-colors disabled:opacity-50 ${
+      className={`flex size-8 items-center justify-center rounded-md transition-colors hover:bg-surface disabled:opacity-50 ${
         props.danger ? 'text-muted hover:text-danger' : props.pressed ? 'text-accent' : 'text-muted hover:text-ink'
       }`}
     >
-      <Icon aria-hidden className={`size-3.5 ${props.pressed ? 'fill-current' : ''}`} />
+      <Icon aria-hidden className={`size-4 ${props.pressed ? 'fill-current' : ''}`} />
     </button>
   );
 }
@@ -182,7 +208,7 @@ export function ClipList(props: {
     );
   }
   if (items.length === 0) {
-    return <p className="p-8 text-center text-sm text-muted">{filter.query ? 'No matches.' : props.emptyText ?? 'Nothing copied yet.'}</p>;
+    return <p className="mx-auto max-w-sm py-16 text-center text-base text-muted">{filter.query ? `Nothing matches “${filter.query}”.` : props.emptyText ?? 'Nothing copied yet.'}</p>;
   }
   const visible = selected ? [...selected].filter((id) => items.some((i) => i.id === id)) : [];
   const toggle = (id: string): void =>
@@ -194,10 +220,10 @@ export function ClipList(props: {
   const bulk = (fn: (ids: string[]) => Promise<unknown>) => (): void => void fn(visible).then(() => setSelected(null));
   return (
     <div className="space-y-2">
-      <div role="toolbar" aria-label="Selection" className="flex items-center gap-1 text-xs text-muted">
+      <div role="toolbar" aria-label="Selection" className="flex min-h-9 items-center gap-1 text-sm text-muted">
         {selected ? (
           <>
-            <span className="mr-auto">{visible.length} selected</span>
+            <span className="mr-auto font-semibold text-ink">{visible.length} selected</span>
             <IconButton icon={CheckSquare} label="Select all" onClick={() => setSelected(new Set(items.map((i) => i.id)))} />
             <IconButton icon={Pin} label="Pin selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, { pinned: true }))))} />
             <IconButton icon={PinOff} label="Unpin selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, { pinned: false }))))} />
@@ -211,10 +237,10 @@ export function ClipList(props: {
             <IconButton icon={X} label="Cancel selection" onClick={() => setSelected(null)} />
           </>
         ) : (
-          <button type="button" onClick={() => setSelected(new Set())} className="ml-auto rounded px-2 py-1 hover:text-ink">Select</button>
+          <button type="button" onClick={() => setSelected(new Set())} className="ml-auto rounded-md px-2.5 py-1 hover:bg-raised hover:text-ink">Select</button>
         )}
       </div>
-      <ul className="space-y-2">
+      <ul className="space-y-2.5">
         {items.map((item) => (
           <li key={item.id}>
             <ClipCard

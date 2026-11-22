@@ -15,8 +15,6 @@ linux:
   icon: resources/icon.png
   executableName: clipply
   syncDesktopName: true
-  # Launchers start straight on XWayland, so the one-time relaunch (electron/main/index.ts) is skipped.
-  executableArgs: [--ozone-platform=x11]
   maintainer: Clipply <clipply@users.noreply.github.com>
   synopsis: End-to-end encrypted clipboard history
 deb:

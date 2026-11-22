@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import { BackupPanel, StoragePanel } from '@clipply/ui';
+import { useState } from 'react';
+import { BackupPanel, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher } from '@clipply/ui';
 
 import type { MobileSettings, Runtime } from '../services/runtime';
 
@@ -16,57 +16,41 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
   };
 
   return (
-    <div className="space-y-4 p-4">
-      <h1 className="text-lg font-semibold">Settings</h1>
-      <Section title="Capture">
-        <Toggle label="Capture monitoring" hint="Off pauses every capture path, including the screenshot job." checked={s.monitoring} onChange={(v) => update({ monitoring: v })} />
-        <Toggle label="Save the clipboard when I open Clipply" checked={s.captureOnOpen} onChange={(v) => update({ captureOnOpen: v })} />
-        <Toggle label="Import new screenshots" hint="Needs photo access. Android wakes Clipply only when a new image appears; nothing runs in between." checked={s.screenshots} onChange={(v) => update({ screenshots: v })} />
-        <p className="text-xs text-muted">
-          Android only lets the app on screen read the clipboard. Clipply never reads it in the background. Other ways to save: Share → Clipply,
-          select text → “Save to Clipply”, or the Clipply Quick Settings tile. Passwords marked sensitive are skipped.
-        </p>
-      </Section>
-      <Section title="History">
-        <label className="flex items-center justify-between text-sm">
-          Keep history for
-          <select value={s.retentionDays} onChange={(e) => update({ retentionDays: Number(e.target.value) })} className="rounded-md border border-line bg-raised px-2 py-1">
-            {RETENTION.map((d) => <option key={d} value={d}>{d === 0 ? 'Forever' : `${d} day${d > 1 ? 's' : ''}`}</option>)}
+    <div className="space-y-4 px-4 py-6">
+      <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+      {note && <p role="status" className="rounded-lg bg-clip/15 px-4 py-3 text-sm">{note}</p>}
+      <SettingsSection title="Appearance">
+        <div className="space-y-2">
+          <span className="text-sm">Theme</span>
+          <ThemeSwitcher />
+        </div>
+      </SettingsSection>
+      <SettingsSection
+        title="Capture"
+        description="Android lets only the app on screen read the clipboard, so Clipply never reads it in the background. You can also share to Clipply, use “Save to Clipply” on selected text, or the Quick Settings tile."
+      >
+        <SwitchRow label="Save clips" hint="Off pauses every way of saving, including screenshots." checked={s.monitoring} onChange={(v) => update({ monitoring: v })} />
+        <SwitchRow label="Save the clipboard when I open Clipply" checked={s.captureOnOpen} onChange={(v) => update({ captureOnOpen: v })} />
+        <SwitchRow label="Import new screenshots" hint="Needs photo access. Android wakes Clipply only when a new image appears." checked={s.screenshots} onChange={(v) => update({ screenshots: v })} />
+      </SettingsSection>
+      <SettingsSection title="History" description="Pinned and favorite clips are always kept.">
+        <label className="flex items-center justify-between gap-4">
+          <span className="text-sm">Keep clips for</span>
+          <select value={s.retentionDays} onChange={(e) => update({ retentionDays: Number(e.target.value) })} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm">
+            {RETENTION.map((d) => <option key={d} value={d}>{d === 0 ? 'Forever' : d === 365 ? '1 year' : `${d} day${d > 1 ? 's' : ''}`}</option>)}
           </select>
         </label>
         <StoragePanel />
-      </Section>
-      <Section title="Backup">
+      </SettingsSection>
+      <SettingsSection title="Backup" description="Save your history to an encrypted file, or bring one back in.">
         <BackupPanel actions={rt} />
-      </Section>
-      <Section title="Battery">
-        <p className="text-xs text-muted">
-          No background service, polling or open connection. Items saved while Clipply is closed are uploaded by one batched job that waits
-          for a network connection; new items from other devices arrive when you open the app.
+      </SettingsSection>
+      <SettingsSection title="Battery">
+        <p className="text-sm text-muted">
+          Nothing runs in the background. Clips saved while Clipply is closed upload in one batch once you are online. Clips from your other
+          devices arrive when you open the app.
         </p>
-      </Section>
-      {note && <p role="status" className="text-sm text-muted">{note}</p>}
+      </SettingsSection>
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3 rounded-xl border border-line bg-raised/40 p-4">
-      <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between gap-4 text-sm">
-      <span>
-        {label}
-        {hint && <span className="block text-xs text-muted">{hint}</span>}
-      </span>
-      <input type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} className="size-5 accent-[var(--color-accent)]" />
-    </label>
   );
 }

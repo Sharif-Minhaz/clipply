@@ -52,7 +52,8 @@ describe('DevicesPanel', () => {
     expect(within(dialog).queryByRole('button', { name: /copy/i })).toBeNull();
     const done = within(dialog).getByRole('button', { name: 'I saved my recovery key' });
     expect((done as HTMLButtonElement).disabled).toBe(true);
-    await user.type(within(dialog).getByRole('textbox'), 'wxyz0');
+    // Letter O for zero is accepted, as the recovery-key parser accepts it.
+    await user.type(within(dialog).getByRole('textbox'), 'wxyzo');
     expect((done as HTMLButtonElement).disabled).toBe(false);
     await user.click(done);
     expect(screen.queryByRole('dialog')).toBeNull();

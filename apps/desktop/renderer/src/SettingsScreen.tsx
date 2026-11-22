@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { BackupPanel, StoragePanel } from '@clipply/ui';
+import { useEffect, useState } from 'react';
+import { BackupPanel, buttonClass, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher } from '@clipply/ui';
 
 import type { DesktopStatus } from '../../electron/shared/api';
 import type { Settings } from '../../electron/main/settings';
@@ -12,6 +12,11 @@ const RETENTION = [
   { days: 365, label: '1 year' },
   { days: 0, label: 'Forever' },
 ];
+
+const PROVIDER_LABEL: Record<string, string> = {
+  'xwayland-helper': 'Background helper on XWayland',
+  'electron-x11': 'X11',
+};
 
 export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | null; onChanged: () => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -26,132 +31,108 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
     onChanged();
   };
 
-  if (!settings) return <div className="p-5 text-sm text-muted">Loading…</div>;
+  if (!settings) return <div className="p-8 text-sm text-muted">Loading settings…</div>;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-5">
-      <h1 className="text-lg font-semibold">Settings</h1>
+    <div className="mx-auto max-w-2xl space-y-5 px-6 py-8">
+      <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+      {message && <p role="status" className="rounded-lg bg-clip/15 px-4 py-3 text-sm text-ink">{message}</p>}
 
-      <Section title="Capture">
-        <Toggle label="Monitor the clipboard" checked={settings.monitoring} onChange={(v) => void update({ monitoring: v })} />
-        <Toggle label="Capture images" checked={settings.captureImages} onChange={(v) => void update({ captureImages: v })} />
-        <Toggle
+      <SettingsSection title="Appearance">
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm">Theme</span>
+          <ThemeSwitcher />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Capture" description="Copies flagged as passwords by password managers are never saved.">
+        <SwitchRow label="Watch the clipboard" checked={settings.monitoring} onChange={(v) => void update({ monitoring: v })} />
+        <SwitchRow label="Save copied images" checked={settings.captureImages} onChange={(v) => void update({ captureImages: v })} />
+        <SwitchRow
           label="Import new screenshots"
-          hint={status?.screenshotDir ? `${status.screenshotDir}${status.screenshotWatching ? '' : ' (not watching)'}` : undefined}
+          hint={status?.screenshotDir ? `${status.screenshotDir}${status.screenshotWatching ? '' : ' (waiting for this folder)'}` : undefined}
           checked={settings.screenshots}
           onChange={(v) => void update({ screenshots: v })}
         />
-        <p className="text-xs text-muted">
-          Items flagged by password managers are never captured. Remote items never replace your clipboard automatically.
-        </p>
-      </Section>
+      </SettingsSection>
 
-      <Section title="Excluded apps">
-        <label className="block text-sm">
-          Never capture copies from these apps (window class, one per line — e.g. <code>keepassxc</code>; find one with <code>xprop WM_CLASS</code>)
+      <SettingsSection title="Excluded apps" description="Copies made in these apps are never saved. One window class per line, for example keepassxc.">
+        <div className="space-y-2">
           <textarea
             aria-label="Excluded apps"
             rows={3}
             defaultValue={settings.excludedApps.join('\n')}
             onBlur={(e) => void update({ excludedApps: [...new Set(e.target.value.split('\n').map((x) => x.trim().toLowerCase()).filter(Boolean))] }).catch((err: unknown) => setMessage(String(err)))}
-            className="mt-1 w-full rounded-md border border-line bg-raised px-2 py-1 font-mono text-xs"
+            className="w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-sm"
           />
-        </label>
-        {status?.session === 'wayland' && (
           <p className="text-xs text-muted">
-            On Wayland this works only for apps running through XWayland; GNOME does not tell other apps which native Wayland window is focused.
+            Find an app’s class by running <code className="font-mono">xprop WM_CLASS</code> and clicking its window.
+            {status?.session === 'wayland' && ' On Wayland this works for apps that run through XWayland only.'}
           </p>
-        )}
-      </Section>
+        </div>
+      </SettingsSection>
 
-      <Section title="History">
-        <label className="flex items-center justify-between text-sm">
-          Keep history for
+      <SettingsSection title="History" description="Pinned and favorite clips are always kept.">
+        <label className="flex items-center justify-between gap-4">
+          <span className="text-sm">Keep clips for</span>
           <select
             value={settings.retentionDays}
             onChange={(e) => void update({ retentionDays: Number(e.target.value) })}
-            className="rounded-md border border-line bg-raised px-2 py-1 text-sm"
+            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm"
           >
             {RETENTION.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
           </select>
         </label>
-        <p className="text-xs text-muted">Pinned and favorite items are always kept.</p>
         <StoragePanel />
-        {message && <p role="status" className="text-xs text-muted">{message}</p>}
-      </Section>
+      </SettingsSection>
 
-      <Section title="Backup">
+      <SettingsSection title="Backup" description="Save your history to an encrypted file, or bring one back in.">
         <BackupPanel actions={window.clipply} />
-      </Section>
+      </SettingsSection>
 
-      <Section title="Desktop">
-        <Toggle label="Start Clipply when I log in" checked={settings.launchAtLogin} onChange={(v) => void update({ launchAtLogin: v })} />
-        <Toggle label="Keep running in the tray when the window is closed" checked={settings.closeToTray} onChange={(v) => void update({ closeToTray: v })} />
-        <div className="space-y-1 text-sm">
-          <div className="flex items-center justify-between">
-            <span>Keyboard shortcut (Super+Shift+V)</span>
-            {status?.gnomeShortcut ? (
-              <span className="text-xs text-accent">GNOME shortcut installed</span>
-            ) : (
-              <button
-                type="button"
-                onClick={() =>
-                  void window.clipply.installGnomeShortcut().then(
-                    () => {
-                      setMessage('GNOME shortcut installed.');
-                      onChanged();
-                    },
-                    (e: unknown) => setMessage(`Could not install shortcut: ${e instanceof Error ? e.message : String(e)}`),
-                  )
-                }
-                className="rounded-md border border-line px-3 py-1 text-xs hover:border-accent"
-              >
-                Add GNOME shortcut
-              </button>
-            )}
-          </div>
-          <p className="text-xs text-muted">
-            {status?.session === 'wayland'
-              ? 'On GNOME Wayland, app-registered shortcuts only work while Clipply is focused, so Clipply adds a GNOME custom shortcut instead (Settings → Keyboard → Custom Shortcuts).'
-              : status?.globalShortcut
-                ? `Registered globally as ${status.globalShortcut}.`
-                : 'Global shortcut not registered.'}
-          </p>
+      <SettingsSection title="Desktop">
+        <SwitchRow label="Start Clipply when I log in" checked={settings.launchAtLogin} onChange={(v) => void update({ launchAtLogin: v })} />
+        <SwitchRow label="Keep running in the tray when the window is closed" checked={settings.closeToTray} onChange={(v) => void update({ closeToTray: v })} />
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm">
+            Open Clipply with <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 font-sans text-xs font-semibold">Super</kbd>{' + '}
+            <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 font-sans text-xs font-semibold">V</kbd>
+            {status?.session === 'wayland' && <span className="mt-0.5 block text-xs text-muted">Added as a GNOME custom shortcut. GNOME’s notification list moves to Super + M.</span>}
+          </span>
+          {status?.gnomeShortcut ? (
+            <span className="text-sm font-semibold text-accent">Ready</span>
+          ) : status?.session === 'wayland' ? (
+            <button
+              type="button"
+              onClick={() =>
+                void window.clipply.installGnomeShortcut().then(
+                  () => {
+                    setMessage('Super + V now opens Clipply.');
+                    onChanged();
+                  },
+                  (e: unknown) => setMessage(`The shortcut was not added: ${e instanceof Error ? e.message : String(e)}`),
+                )
+              }
+              className={buttonClass.plain}
+            >
+              Add shortcut
+            </button>
+          ) : (
+            <span className="text-sm text-muted">{status?.globalShortcut ? 'Ready' : 'Unavailable'}</span>
+          )}
         </div>
-      </Section>
+      </SettingsSection>
 
-      <Section title="Security">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+      <SettingsSection title="Security" description="History is encrypted on disk with XChaCha20-Poly1305. The keys live in your system keyring.">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
           <dt className="text-muted">Key storage</dt>
-          <dd>{status?.keyringBackend === 'gnome_libsecret' ? 'GNOME Keyring (libsecret)' : status?.keyringBackend}</dd>
+          <dd>{status?.keyringBackend === 'gnome_libsecret' ? 'GNOME Keyring' : status?.keyringBackend}</dd>
           <dt className="text-muted">Clipboard access</dt>
-          <dd>{status?.provider} {status?.session === 'wayland' ? '(XWayland)' : ''}</dd>
-          <dt className="text-muted">Unreadable items</dt>
+          <dd>{(status && PROVIDER_LABEL[status.provider]) ?? status?.provider}</dd>
+          <dt className="text-muted">Unreadable clips</dt>
           <dd>{status?.corrupt ?? 0}</dd>
         </dl>
-        <p className="text-xs text-muted">History is encrypted on disk with XChaCha20-Poly1305; the keys live in your OS keyring.</p>
-      </Section>
+      </SettingsSection>
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3 rounded-xl border border-line bg-raised/40 p-4">
-      <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string | undefined; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex cursor-pointer items-center justify-between gap-4 text-sm">
-      <span>
-        {label}
-        {hint && <span className="block text-xs text-muted">{hint}</span>}
-      </span>
-      <input type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} className="size-4 accent-[var(--color-accent)]" />
-    </label>
   );
 }

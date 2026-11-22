@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import logo from './logo.png';
 import { Clipboard, Laptop, Pause, Pin, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { ClipList, ItemViewer, KindFilter, SearchBar } from '@clipply/ui';
+import { ClipList, ItemViewer, SearchStrip } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -42,12 +43,10 @@ export function App() {
 
   return (
     <div className="flex h-screen bg-surface text-ink">
-      <nav aria-label="Main" className="flex w-52 shrink-0 flex-col gap-1 border-r border-line p-3">
-        <div className="mb-4 flex items-center gap-2 px-2 pt-1 text-sm font-semibold tracking-tight">
-          <span aria-hidden className="flex size-6 items-center justify-center rounded-md bg-accent/20 text-accent">
-            <Clipboard className="size-3.5" />
-          </span>
-          Clipply
+      <nav aria-label="Main" className="flex w-56 shrink-0 flex-col gap-0.5 bg-frame px-3 py-4 text-frame-ink">
+        <div className="mb-5 flex items-center gap-2.5 px-2">
+          <img src={logo} alt="" className="size-8 rounded-lg" />
+          <span className="text-lg font-bold tracking-tight">Clipply</span>
         </div>
         {NAV.map(({ tab: t, label, icon: Icon }) => (
           <button
@@ -55,12 +54,14 @@ export function App() {
             type="button"
             aria-current={tab === t ? 'page' : undefined}
             onClick={() => setTab(t)}
-            className={`flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
-              tab === t ? 'bg-raised text-ink' : 'text-muted hover:bg-raised/60 hover:text-ink'
+            className={`relative flex items-center gap-3 rounded-lg px-3 py-2 text-[0.9375rem] transition-colors ${
+              tab === t ? 'bg-frame-hover font-semibold text-frame-ink' : 'text-frame-muted hover:bg-frame-hover hover:text-frame-ink'
             }`}
           >
-            <Icon aria-hidden className="size-4" />
+            {tab === t && <span aria-hidden className="absolute inset-y-2 -left-3 w-1 rounded-r bg-clip" />}
+            <Icon aria-hidden className={`size-[18px] ${tab === t ? 'text-clip' : ''}`} />
             {label}
+            {t === 'clipboard' && status && <span className="ml-auto text-xs font-normal text-frame-muted tabular-nums">{status.items}</span>}
           </button>
         ))}
         <div className="mt-auto">
@@ -68,18 +69,20 @@ export function App() {
             <button
               type="button"
               onClick={() => void window.clipply.updateSettings({ monitoring: !status.monitoring }).then(refresh)}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-muted hover:text-ink"
+              title={status.monitoring ? 'Pause watching the clipboard' : 'Resume watching the clipboard'}
+              className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs text-frame-muted hover:bg-frame-hover hover:text-frame-ink"
             >
-              {status.monitoring ? <Pause aria-hidden className="size-3.5" /> : <Play aria-hidden className="size-3.5" />}
-              {status.monitoring ? 'Monitoring' : 'Paused'} · {status.items} items
+              <span aria-hidden className={`size-2 shrink-0 rounded-full ${status.monitoring ? 'bg-clip' : 'bg-frame-muted'}`} />
+              <span className="flex-1">{status.monitoring ? 'Watching the clipboard' : 'Paused'}</span>
+              {status.monitoring ? <Pause aria-hidden className="size-4" /> : <Play aria-hidden className="size-4" />}
             </button>
           )}
         </div>
       </nav>
       <main className="min-w-0 flex-1 overflow-y-auto">
-        {tab === 'clipboard' && <HistoryScreen base={{}} empty="Nothing copied yet. Copy something anywhere and it shows up here." />}
-        {tab === 'favorites' && <HistoryScreen base={{ favorite: true }} empty="No favorites yet." />}
-        {tab === 'pinned' && <HistoryScreen base={{ pinned: true }} empty="No pinned items yet." />}
+        {tab === 'clipboard' && <HistoryScreen base={{}} empty="Nothing copied yet. Copy something anywhere and it lands here." />}
+        {tab === 'favorites' && <HistoryScreen base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
+        {tab === 'pinned' && <HistoryScreen base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
         {tab === 'devices' && <DevicesScreen />}
         {tab === 'settings' && <SettingsScreen status={status} onChanged={refresh} />}
       </main>
@@ -106,9 +109,8 @@ function HistoryScreen({ base, empty }: { base: ListFilter; empty: string }) {
 
   const filter: ListFilter = { ...base, ...(query ? { query } : {}), ...(kinds.length ? { kinds } : {}) };
   return (
-    <div className="mx-auto max-w-3xl space-y-3 p-5">
-      <SearchBar value={query} onChange={setQuery} inputRef={searchRef} />
-      <KindFilter value={kinds} onChange={setKinds} />
+    <div className="mx-auto max-w-3xl space-y-3 px-6 pb-8">
+      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} />
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} deviceNames={{}} />
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
     </div>

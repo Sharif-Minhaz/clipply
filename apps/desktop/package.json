@@ -7,9 +7,9 @@
   "description": "Clipply \u2014 end-to-end encrypted clipboard history",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev -- --ozone-platform=x11",
+    "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "start": "electron-vite preview -- --ozone-platform=x11",
+    "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
     "test": "vitest run",
     "dist": "electron-vite build && electron-builder --linux",
