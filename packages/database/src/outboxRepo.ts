@@ -71,6 +71,11 @@ export function outboxRepo(db: SqlDb) {
       await db.run('DELETE FROM outbox WHERE op_id = ?', [opId]);
     },
 
+    async forItem(itemId: string): Promise<OutboxRow | null> {
+      const [row] = await db.query<RawRow>('SELECT * FROM outbox WHERE item_id = ?', [itemId]);
+      return row ? fromRaw(row) : null;
+    },
+
     /** Drops whatever is queued for an item (used when a never-synced item is deleted). */
     async removeForItem(itemId: string): Promise<void> {
       await db.run('DELETE FROM outbox WHERE item_id = ?', [itemId]);

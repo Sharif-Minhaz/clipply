@@ -6,6 +6,7 @@ import { openTestDb } from '@clipply/database/testing';
 
 import { classifyText, htmlToText, uuidv7 } from './content';
 import { ClipLibrary, ContentTooLargeError, ItemNotFoundError, MAX_CAPTURE_BYTES } from './library';
+import { exportBackup, importBackup } from './backup';
 
 const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
 let db: SqlDb;
@@ -146,6 +147,22 @@ describe('ClipLibrary', () => {
     expect(fresh.corruptCount).toBe(1);
   });
 
+  it('re-keys local history into another vault without touching bodies', async () => {
+    const { id } = (await lib.capture({ type: 'text', text: 'joins the account' }))!;
+    await lib.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(1, 2, 3) });
+    const before = await itemRepo(db).get(id);
+    const old = ring;
+    ring = createKeyring();
+    expect(await lib.adoptKeyring(old)).toBe(2);
+    const after = await itemRepo(db).get(id);
+    expect(after!.body).toEqual(before!.body);
+    expect(after!.dek).not.toEqual(before!.dek);
+    expect(after!.contentHash).toBe(lib.hashOf({ type: 'text', text: 'joins the account' }));
+    expect(lib.list().map((v) => v.preview)).toContain('joins the account');
+    expect(lib.corruptCount).toBe(0);
+    expect(await lib.capture({ type: 'text', text: 'joins the account' })).toMatchObject({ id, duplicate: true });
+  });
+
   it('notifies subscribers and exposes the hash for self-write detection', async () => {
     let calls = 0;
     const off = lib.subscribe(() => calls++);
@@ -154,5 +171,28 @@ describe('ClipLibrary', () => {
     await lib.capture({ type: 'text', text: 'y' });
     expect(calls).toBe(1);
     expect(lib.hashOf({ type: 'text', text: 'x\r\n' })).toBe(lib.list({ query: 'x' })[0]?.meta.contentHash);
+  });
+});
+
+describe('encrypted backup', () => {
+  it('exports with a passphrase and imports into another vault, keeping metadata and skipping duplicates', async () => {
+    const t = await lib.capture({ type: 'text', text: 'backup me' });
+    await lib.setFlags(t!.id, { pinned: true, title: 'Kept' });
+    await lib.capture({ type: 'image', mime: 'image/png', data: new Uint8Array([1, 2, 3]), thumb: new Uint8Array([9]) });
+    const { data, count } = await exportBackup(lib, 'long enough passphrase');
+    expect(count).toBe(2);
+    expect(new TextDecoder().decode(data)).not.toContain('backup me');
+
+    const otherDb = openTestDb();
+    await migrate(otherDb);
+    const otherRing = createKeyring();
+    const other = new ClipLibrary({ db: otherDb, keyring: () => otherRing, deviceId: DEVICE });
+    await other.capture({ type: 'text', text: 'backup me' });
+    await expect(importBackup(other, data, 'wrong passphrase!!')).rejects.toThrow(/wrong passphrase/);
+    expect(await importBackup(other, data, 'long enough passphrase')).toEqual({ imported: 1, duplicates: 1, failed: 0 });
+    const img = other.list({ kinds: ['image'] })[0]!;
+    expect(await other.readBody(img.id)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await other.readThumb(img.id)).toEqual(new Uint8Array([9]));
+    expect(img.meta.createdAt).toBe(lib.list({ kinds: ['image'] })[0]!.meta.createdAt);
   });
 });

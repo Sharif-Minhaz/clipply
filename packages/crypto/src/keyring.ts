@@ -4,10 +4,31 @@ import { fromB64, fromUtf8, toB64, utf8 } from './encoding';
 import { KEY_BYTES, randomKey } from './aead';
 import { CryptoError, sodium } from './sodium';
 
-/** Every vault key generation the device knows. Old epochs stay so old items remain readable. */
+/** A device allowed to hold the vault. The roster travels inside the signed, sealed keyring. */
+export interface RosterEntry {
+  readonly id: string;
+  readonly boxPublicKey: Uint8Array;
+  readonly signPublicKey: Uint8Array;
+}
+
+/** Public half of the recovery-key-derived keys; devices seal new keyrings to `boxPublicKey`. */
+export interface RecoveryPublicKeys {
+  readonly boxPublicKey: Uint8Array;
+  readonly signPublicKey: Uint8Array;
+  /** Devices that have held this recovery key (created it or recovered with it); revoking one replaces the key. */
+  readonly knownBy?: readonly string[];
+}
+
+/**
+ * Every vault key generation the device knows (old epochs stay so old items remain readable),
+ * plus the authorized-device roster and recovery public keys. Because these travel only inside
+ * authenticated envelopes, a server cannot add a device or redirect recovery (encryption.md §5).
+ */
 export interface Keyring {
   readonly current: number;
   readonly keys: ReadonlyMap<number, Uint8Array>;
+  readonly roster?: readonly RosterEntry[];
+  readonly recovery?: RecoveryPublicKeys;
 }
 
 export function createKeyring(): Keyring {
@@ -17,7 +38,21 @@ export function createKeyring(): Keyring {
 /** New epoch for key rotation after a device revocation. */
 export function rotateKeyring(ring: Keyring): Keyring {
   const next = ring.current + 1;
-  return { current: next, keys: new Map([...ring.keys, [next, randomKey()]]) };
+  return { ...ring, current: next, keys: new Map([...ring.keys, [next, randomKey()]]) };
+}
+
+export function withRoster(ring: Keyring, roster: readonly RosterEntry[]): Keyring {
+  const ids = new Set(roster.map((r) => r.id));
+  if (ids.size !== roster.length) throw new CryptoError('duplicate device in roster');
+  return { ...ring, roster };
+}
+
+export function withRecovery(ring: Keyring, recovery: RecoveryPublicKeys): Keyring {
+  return { ...ring, recovery };
+}
+
+export function rosterEntry(ring: Keyring, deviceId: string): RosterEntry | undefined {
+  return ring.roster?.find((r) => r.id === deviceId);
 }
 
 export function epochKey(ring: Keyring, epoch: number): Uint8Array {
@@ -46,15 +81,30 @@ export function contentHash(ring: Keyring, normalizedContent: Uint8Array): strin
   return s.to_hex(s.crypto_generichash(32, normalizedContent, hashKey));
 }
 
+const PublicPair = z.object({ box: z.string(), sign: z.string() });
 const KeyringJson = z.object({
   v: z.literal(1),
   current: z.number().int().min(1),
   keys: z.record(z.string().regex(/^[1-9]\d*$/), z.string()),
+  roster: z.array(PublicPair.extend({ id: z.string().min(1).max(64) })).max(64).optional(),
+  recovery: PublicPair.extend({ knownBy: z.array(z.string().min(1).max(64)).max(64).optional() }).optional(),
 });
+
+function publicKey(b64: string): Uint8Array {
+  const k = fromB64(b64);
+  if (k.length !== 32) throw new CryptoError('malformed public key');
+  return k;
+}
 
 export function serializeKeyring(ring: Keyring): Uint8Array {
   const keys = Object.fromEntries([...ring.keys].map(([epoch, key]) => [String(epoch), toB64(key)]));
-  return utf8(JSON.stringify({ v: 1, current: ring.current, keys }));
+  return utf8(JSON.stringify({
+    v: 1,
+    current: ring.current,
+    keys,
+    ...(ring.roster ? { roster: ring.roster.map((r) => ({ id: r.id, box: toB64(r.boxPublicKey), sign: toB64(r.signPublicKey) })) } : {}),
+    ...(ring.recovery ? { recovery: { box: toB64(ring.recovery.boxPublicKey), sign: toB64(ring.recovery.signPublicKey), ...(ring.recovery.knownBy ? { knownBy: [...ring.recovery.knownBy] } : {}) } } : {}),
+  }));
 }
 
 export function parseKeyring(bytes: Uint8Array): Keyring {
@@ -71,5 +121,11 @@ export function parseKeyring(bytes: Uint8Array): Keyring {
     if (keys.get(epoch)?.length !== KEY_BYTES) throw new CryptoError('keyring is missing an epoch');
   }
   if (keys.size !== parsed.data.current) throw new CryptoError('keyring has keys beyond current epoch');
-  return { current: parsed.data.current, keys };
+  const { roster, recovery } = parsed.data;
+  return {
+    current: parsed.data.current,
+    keys,
+    ...(roster ? { roster: roster.map((r) => ({ id: r.id, boxPublicKey: publicKey(r.box), signPublicKey: publicKey(r.sign) })) } : {}),
+    ...(recovery ? { recovery: { boxPublicKey: publicKey(recovery.box), signPublicKey: publicKey(recovery.sign), ...(recovery.knownBy ? { knownBy: recovery.knownBy } : {}) } } : {}),
+  };
 }

@@ -1,6 +1,6 @@
 # Synchronization protocol
 
-Status: **design (Phase 0)**. Wire shapes are implemented in `packages/shared-schemas/src/sync.ts`; engine lands in Phase 5.
+Status: **implemented** — engine `packages/sync-engine/src/sync.ts` (+ remote operations in `library.ts`, orchestration in `account.ts`), server `apps/server/src/modules/sync`. Tested with two simulated devices against the real API (`apps/server/test/sync.test.ts`, `account.test.ts`).
 
 ## 1. Ordering
 
@@ -63,3 +63,12 @@ POST /v1/storage/upload-signature {itemId,size} → signed Cloudinary raw/privat
 POST /v1/storage/confirm      {itemId, uploadResponse} → verifies Cloudinary signature, records object
 GET  /v1/storage/download-url?itemId          → short-lived signed private download URL (owner-checked)
 ```
+
+## 8. Implementation notes
+
+- **Payload choice**: text-like bodies travel inline when the ciphertext fits (≤ ~48 KB); larger bodies and **all images** go to Cloudinary, so the encrypted thumbnail can ride inline. Blobs are fetched lazily on first preview, authenticated, then cached as ciphertext.
+- **Conflict outcomes** (`ClipLibrary.resolveConflict`): same content hash → server version kept with our flags/title re-applied (`merged`); different content → server version kept under the id and our edit saved as a new item titled "Edited copy" (`forked`); server tombstone → local item removed (`deleted`).
+- **Pending local edits are never overwritten by a pull**; their push conflicts and is resolved as above.
+- **Desktop scheduling** (`AccountController.startScheduler`): `/vault/state` + `/sync/head` probe every 60 s (5 min after 30 min idle), sync 2 s after local changes and on window focus. Android does not use the scheduler (WorkManager, Phase 6).
+- **Keyring changes**: every sync first checks `/vault/state.version`; a new version triggers `refreshKeyring`. Pulls stop (without advancing the cursor) on an item under an unknown epoch until the keyring is refreshed.
+- Verified scenarios: convergence, image blobs + thumbnails, edits/flags/deletes, concurrent flag merge, concurrent edit fork, delete beats offline edit, cross-device duplicate collapse, offline backoff, lost push response replay, full resync after purge, idle head probe, token expiry refresh, revoked device detection.

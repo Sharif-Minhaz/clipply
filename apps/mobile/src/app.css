@@ -1,0 +1,9 @@
+@import "@clipply/ui/styles.css";
+@source "./";
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}

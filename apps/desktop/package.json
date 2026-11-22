@@ -1,0 +1,37 @@
+{
+  "name": "@clipply/desktop",
+  "productName": "Clipply",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Clipply — end-to-end encrypted clipboard history",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev -- --ozone-platform=x11",
+    "build": "electron-vite build",
+    "start": "electron-vite preview -- --ozone-platform=x11",
+    "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clipply/crypto": "*",
+    "@clipply/database": "*",
+    "@clipply/logger": "*",
+    "@clipply/shared-schemas": "*",
+    "@clipply/sync-engine": "*",
+    "@clipply/ui": "*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.4.1",
+    "electron-vite": "^6.0.0",
+    "tailwindcss": "^4.3.5",
+    "vite": "^8.3.8"
+  }
+}

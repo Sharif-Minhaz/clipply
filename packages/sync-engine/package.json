@@ -13,6 +13,9 @@
   "dependencies": {
     "@clipply/crypto": "*",
     "@clipply/database": "*",
-    "@clipply/shared-schemas": "*"
+    "@clipply/shared-schemas": "*",
+    "@clipply/api-client": "*",
+    "@clipply/logger": "*",
+    "zod": "^4.6.7"
   }
 }

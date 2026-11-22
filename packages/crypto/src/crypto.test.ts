@@ -8,8 +8,8 @@ import {
   CryptoError, contentHash, createKeyring, deriveRecoveryKeys, enrollmentCode, extendsKeyring,
   formatRecoveryKey, generateDek, generateDeviceKeys, generateRecoveryKey, initCrypto, itemAad,
   openKeyringEnvelope, openMeta, openPart, openRecoveryEnvelope, parseKeyring, parseRecoveryKey,
-  rotateKeyring, sealKeyringFor, sealMeta, sealPart, sealRecoveryEnvelope, serializeKeyring,
-  unwrapDek, wrapDek,
+  recoveryProofMessage, recoveryPublicKeys, rosterEntry, rotateKeyring, sealKeyringFor, sealMeta, sealPart,
+  sealRecoveryEnvelope, serializeKeyring, signRecoveryProof, unwrapDek, withRecovery, withRoster, wrapDek,
 } from './index';
 
 beforeAll(initCrypto);
@@ -108,6 +108,8 @@ describe('keyring', () => {
     const restored = parseKeyring(serializeKeyring(next));
     expect(unwrapDek(restored, ID_A, old)).toEqual(dek);
     expect(extendsKeyring(next, ring)).toBe(true);
+    const rec = withRecovery(next, { boxPublicKey: new Uint8Array(32).fill(1), signPublicKey: new Uint8Array(32).fill(2), knownBy: ['dev-1'] });
+    expect(parseKeyring(serializeKeyring(rec)).recovery?.knownBy).toEqual(['dev-1']);
     expect(extendsKeyring(ring, next)).toBe(false);
     expect(extendsKeyring(rotateKeyring(createKeyring()), ring)).toBe(false);
   });
@@ -184,9 +186,32 @@ describe('recovery', () => {
     const keys = deriveRecoveryKeys(rk);
     expect(deriveRecoveryKeys(rk.slice()).sign.publicKey).toEqual(keys.sign.publicKey);
     const ring = rotateKeyring(createKeyring());
-    const env = sealRecoveryEnvelope(ring, keys);
+    const env = sealRecoveryEnvelope(ring, keys.box.publicKey);
     expect(extendsKeyring(openRecoveryEnvelope(env, keys), ring)).toBe(true);
     expect(() => openRecoveryEnvelope(env, deriveRecoveryKeys(generateRecoveryKey()))).toThrow(CryptoError);
+  });
+
+  it('proves recovery-key possession with a signature bound to user, device and time', () => {
+    const keys = deriveRecoveryKeys(generateRecoveryKey());
+    const sig = signRecoveryProof(keys, 'u1', 'd1', 1000);
+    expect(sodium().crypto_sign_verify_detached(sig, recoveryProofMessage('u1', 'd1', 1000), keys.sign.publicKey)).toBe(true);
+    expect(sodium().crypto_sign_verify_detached(sig, recoveryProofMessage('u1', 'd2', 1000), keys.sign.publicKey)).toBe(false);
+  });
+});
+
+describe('roster and recovery keys inside the keyring', () => {
+  it('round-trips through serialization and survives rotation', () => {
+    const a = generateDeviceKeys();
+    const rec = deriveRecoveryKeys(generateRecoveryKey());
+    const ring = withRecovery(withRoster(createKeyring(), [{ id: 'dev-a', boxPublicKey: a.box.publicKey, signPublicKey: a.sign.publicKey }]), recoveryPublicKeys(rec));
+    const back = parseKeyring(serializeKeyring(rotateKeyring(ring)));
+    expect(back.current).toBe(2);
+    expect(rosterEntry(back, 'dev-a')?.signPublicKey).toEqual(a.sign.publicKey);
+    expect(back.recovery?.boxPublicKey).toEqual(rec.box.publicKey);
+    expect(() => withRoster(ring, [rosterEntry(ring, 'dev-a')!, rosterEntry(ring, 'dev-a')!])).toThrow(/duplicate/);
+    const bad = JSON.parse(fromUtf8(serializeKeyring(ring)));
+    bad.roster[0].box = 'AAAA';
+    expect(() => parseKeyring(utf8(JSON.stringify(bad)))).toThrow(/public key/);
   });
 });
 
@@ -210,5 +235,23 @@ describe('cross-platform vectors', () => {
     expect(unwrapDek(ring, ID_A, { keyEpoch: 1, dek: hex(vector.wrappedDek) })).toEqual(dek);
     expect(openPart(dek, ID_A, 'body', hex(vector.bodyCiphertext))).toEqual(body);
     await expect(JSON.stringify(vector, null, 2) + '\n').toMatchFileSnapshot('../vectors/item-v1.json');
+  });
+});
+
+describe('passphrase backup', () => {
+  it('round-trips, and rejects a wrong passphrase, tampering and header swaps', async () => {
+    const { sealWithPassphrase, openWithPassphrase } = await import('./backup');
+    const file = await sealWithPassphrase('correct horse battery', utf8('secret history'));
+    expect(new TextDecoder().decode(file)).not.toContain('secret history');
+    expect(fromUtf8(await openWithPassphrase('correct horse battery', file))).toBe('secret history');
+    await expect(openWithPassphrase('wrong horse battery', file)).rejects.toThrow(/wrong passphrase/);
+    const flipped = file.slice();
+    flipped[flipped.length - 1]! ^= 1;
+    await expect(openWithPassphrase('correct horse battery', flipped)).rejects.toThrow(/wrong passphrase/);
+    const text = new TextDecoder().decode(file.subarray(0, file.indexOf(0x0a)));
+    const weaker = utf8(text.replace('600000', '100000'));
+    await expect(openWithPassphrase('correct horse battery', new Uint8Array([...weaker, ...file.subarray(text.length)]))).rejects.toThrow(/wrong passphrase/);
+    await expect(openWithPassphrase('x', utf8('hello'))).rejects.toThrow(/not a Clipply backup/);
+    await expect(sealWithPassphrase('short', utf8('x'))).rejects.toThrow(/at least/);
   });
 });

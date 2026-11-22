@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { B64, Id, Key32, KeyEpoch, Millis, Signature } from './primitives';
 
 export const DevicePlatform = z.enum(['ubuntu', 'android']);
+export type DevicePlatform = z.infer<typeof DevicePlatform>;
 export const DeviceStatus = z.enum(['pending', 'authorized', 'revoked']);
 
 /** Public halves of the device's keys; private halves never leave OS-protected storage. */
@@ -39,16 +40,17 @@ export type Device = z.infer<typeof Device>;
 export const KeyEnvelope = z.object({
   deviceId: Id,
   epoch: KeyEpoch,
-  sealed: B64,
+  sealed: B64.max(16_384),
   signerDeviceId: Id,
   signature: Signature,
 });
 export type KeyEnvelope = z.infer<typeof KeyEnvelope>;
 
-/** The keyring encrypted under a key derived from the user's recovery key. */
+/** The keyring sealed to the X25519 public key derived from the user's recovery key. */
 export const RecoveryEnvelope = z.object({
   epoch: KeyEpoch,
-  ciphertext: B64,
+  sealed: B64.max(16_384),
+  boxPublicKey: Key32,
   /** Ed25519 key derived from the recovery key; proves recovery-based enrollment to the server. */
   signPublicKey: Key32,
 });

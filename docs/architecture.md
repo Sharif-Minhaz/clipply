@@ -147,7 +147,7 @@ Rejected alternative — images in MongoDB (GridFS/inline chunks): M0's 512 MB t
 | Android background clipboard ban | Mobile capture | Event-driven entry points only; documented, not bypassed. |
 | Kotlin crypto duplication | Mobile correctness | Narrow scope + shared vectors in CI. |
 | Server substitutes keys (MITM at enrollment) | Confidentiality | Short authentication string compared on both devices; signed envelopes; keyring continuity check. |
-| Revoked device colluding with server | Future-data confidentiality | Partially mitigated (signed device list, Phase 7); documented limitation. |
+| Revoked device colluding with server | Future-data confidentiality | Partially mitigated (signed roster in the keyring); documented limitation. |
 | Cloudinary free plan: 25 credits/month (1 credit ≈ 1 GB stored or 1 GB delivered), 10 MB per raw file | Image volume | Images cached locally after first download (each device fetches once), retention + max-size settings, quota shown in settings. |
 | Vercel Hobby: 4.5 MB request body, non-commercial use only, invocation quotas | Hosting | Direct-to-Cloudinary uploads, batch cap (`MAX_PUSH_OPS`), cheap `/sync/head` probe, adaptive desktop polling. |
 | MongoDB M0: 512 MB, connection limits from serverless | Hosting | Only metadata + small ciphertext in Mongo, blobs in Cloudinary; cached client per function instance, low `maxPoolSize`. |

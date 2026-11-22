@@ -28,6 +28,8 @@ export const PushResult = z.discriminatedUnion('status', [
   z.object({ opId: Id, status: z.literal('conflict'), current: ServerItem }),
   /** Item was encrypted under a retired vault key; client must refresh its keyring and re-wrap. */
   z.object({ opId: Id, status: z.literal('stale_epoch'), currentEpoch: KeyEpoch }),
+  /** Permanently invalid (e.g. references a blob that was never uploaded); retrying will not help. */
+  z.object({ opId: Id, status: z.literal('rejected'), reason: z.string().max(100) }),
 ]);
 export type PushResult = z.infer<typeof PushResult>;
 

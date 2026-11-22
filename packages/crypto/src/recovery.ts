@@ -1,12 +1,10 @@
-import { open, seal } from './aead';
-import { concat, fromBase32, toBase32 } from './encoding';
-import { parseKeyring, serializeKeyring, type Keyring } from './keyring';
+import { concat, fromBase32, toBase32, utf8 } from './encoding';
+import { parseKeyring, serializeKeyring, type Keyring, type RecoveryPublicKeys } from './keyring';
 import type { KeyPair } from './device';
 import { CryptoError, sodium } from './sodium';
 
 const RK_BYTES = 32;
 const CHECK_BYTES = 2;
-const RECOVERY_AAD = 'clipply/v1/recovery';
 
 /** 256-bit random recovery key. Shown to the user once; never stored by Clipply or the server. */
 export function generateRecoveryKey(): Uint8Array {
@@ -30,24 +28,47 @@ export function parseRecoveryKey(text: string): Uint8Array {
 }
 
 export interface RecoveryKeys {
-  /** Encrypts the keyring stored on the server. */
-  wrapKey: Uint8Array;
-  /** Proves recovery-key possession to the server during enrollment; public half stored server-side. */
+  /** X25519: keyrings are sealed to the public half, so any device can refresh the recovery copy
+   * after a rotation without knowing the recovery key — and a revoked device cannot open it. */
+  box: KeyPair;
+  /** Ed25519: proves recovery-key possession to the server during recovery enrollment. */
   sign: KeyPair;
 }
 
 export function deriveRecoveryKeys(rk: Uint8Array): RecoveryKeys {
   const s = sodium();
-  const wrapKey = s.crypto_kdf_derive_from_key(32, 1, 'clprecov', rk);
-  const seed = s.crypto_kdf_derive_from_key(s.crypto_sign_SEEDBYTES, 2, 'clprecov', rk);
-  const kp = s.crypto_sign_seed_keypair(seed);
-  return { wrapKey, sign: { publicKey: kp.publicKey, privateKey: kp.privateKey } };
+  const boxKp = s.crypto_box_seed_keypair(s.crypto_kdf_derive_from_key(s.crypto_box_SEEDBYTES, 1, 'clprecov', rk));
+  const signKp = s.crypto_sign_seed_keypair(s.crypto_kdf_derive_from_key(s.crypto_sign_SEEDBYTES, 2, 'clprecov', rk));
+  return {
+    box: { publicKey: boxKp.publicKey, privateKey: boxKp.privateKey },
+    sign: { publicKey: signKp.publicKey, privateKey: signKp.privateKey },
+  };
 }
 
-export function sealRecoveryEnvelope(ring: Keyring, keys: RecoveryKeys): Uint8Array {
-  return seal(keys.wrapKey, serializeKeyring(ring), RECOVERY_AAD);
+export const recoveryPublicKeys = (keys: RecoveryKeys): RecoveryPublicKeys => ({
+  boxPublicKey: keys.box.publicKey,
+  signPublicKey: keys.sign.publicKey,
+});
+
+/** Seals the keyring to the recovery public key. Callers use the key from their own keyring. */
+export function sealRecoveryEnvelope(ring: Keyring, recoveryBoxPublicKey: Uint8Array): Uint8Array {
+  return sodium().crypto_box_seal(serializeKeyring(ring), recoveryBoxPublicKey);
 }
 
-export function openRecoveryEnvelope(ciphertext: Uint8Array, keys: RecoveryKeys): Keyring {
-  return parseKeyring(open(keys.wrapKey, ciphertext, RECOVERY_AAD));
+export function openRecoveryEnvelope(sealed: Uint8Array, keys: RecoveryKeys): Keyring {
+  let bytes: Uint8Array;
+  try {
+    bytes = sodium().crypto_box_seal_open(sealed, keys.box.publicKey, keys.box.privateKey);
+  } catch {
+    throw new CryptoError('recovery envelope cannot be opened with this recovery key');
+  }
+  return parseKeyring(bytes);
+}
+
+export const recoveryProofMessage = (userId: string, deviceId: string, timestamp: number): Uint8Array =>
+  utf8(`clipply/v1/recover/${userId}/${deviceId}/${timestamp}`);
+
+/** Signature the server checks against the stored recovery public key before authorizing a device. */
+export function signRecoveryProof(keys: RecoveryKeys, userId: string, deviceId: string, timestamp: number): Uint8Array {
+  return sodium().crypto_sign_detached(recoveryProofMessage(userId, deviceId, timestamp), keys.sign.privateKey);
 }

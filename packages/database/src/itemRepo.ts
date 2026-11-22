@@ -111,6 +111,17 @@ export function itemRepo(db: SqlDb) {
       return row ? fromRaw(row) : null;
     },
 
+    async syncedIds(): Promise<string[]> {
+      const rows = await db.query<{ id: string }>('SELECT id FROM items WHERE deleted = 0 AND seq IS NOT NULL');
+      return rows.map((r) => r.id);
+    },
+
+    /** Every live item with this keyed hash (cross-device duplicates). */
+    async liveByHash(contentHash: string): Promise<ItemRow[]> {
+      const rows = await db.query<RawRow>(`SELECT ${COLUMNS} FROM items WHERE deleted = 0 AND content_hash = ?`, [contentHash]);
+      return rows.map(fromRaw);
+    },
+
     /** Tombstone: ciphertext dropped now, row kept until the server acknowledges the delete. */
     async markDeleted(id: string, now: number): Promise<void> {
       await db.run(

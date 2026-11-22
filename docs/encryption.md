@@ -1,111 +1,100 @@
 # Encryption and key management
 
-Status: **primitives implemented and tested in `packages/crypto` (Phase 1)**; the enrollment/recovery/rotation *protocols* (server endpoints, UI) land in Phase 4.
+Status: **implemented**. Primitives in `packages/crypto`; protocol (create vault, enroll, recover, revoke + rotate, refresh) in `packages/sync-engine/src/vault.ts`; server rules in `apps/server/src/modules/vault`. Cross-device behaviour is tested end-to-end with three simulated devices against the real API (`apps/server/test/vault.test.ts`).
 
 ## 1. Goals
 
-The server operator, database admin, hosting provider or anyone with a MongoDB or Cloudinary dump cannot read clipboard content, titles, flags or types. Google sign-in identifies the account only; it never grants vault access and is never key material.
+The server operator, database admin, hosting provider or anyone with a MongoDB/Cloudinary dump cannot read clipboard content, titles, flags or types. Google sign-in identifies the account only; it never grants vault access and is never key material.
 
 ## 2. Primitives (libsodium)
 
 | Purpose | Primitive |
 |---|---|
 | Content + key wrapping | `crypto_aead_xchacha20poly1305_ietf` (256-bit key, 192-bit random nonce) |
-| Keyring delivery to a device | `crypto_box_seal` (X25519 + XSalsa20-Poly1305) |
-| Envelope / device-list signatures | `crypto_sign` detached (Ed25519) |
+| Keyring delivery (devices and recovery) | `crypto_box_seal` (X25519 + XSalsa20-Poly1305) |
+| Envelope signatures, recovery proof | `crypto_sign` detached (Ed25519) |
 | Subkey derivation | `crypto_kdf_derive_from_key` (BLAKE2b) |
 | Keyed content hash | `crypto_generichash` (BLAKE2b-256) keyed with a vault-derived subkey |
 | Length hiding | ISO/IEC 7816-4 padding to buckets: 256 B below 4 KiB, 4 KiB below 1 MiB, 64 KiB above |
-| Local passphrase (only when no OS keyring) | `crypto_pwhash` Argon2id — **not in the standard `libsodium-wrappers` build** (verified); the desktop app will use `libsodium-wrappers-sumo` for this one path |
+| Local passphrase (only when no OS keyring) | `crypto_pwhash` Argon2id — **not in the standard `libsodium-wrappers` build** (verified); not implemented yet |
 
-XChaCha20 nonces are random (24 bytes), so collision risk is negligible without counters. No custom constructions.
+XChaCha20 nonces are random (24 bytes). No custom constructions. The AEAD is checked against draft-irtf-cfrg-xchacha §A.3.1.
 
 ## 3. Key hierarchy
 
 ```text
-Recovery Key RK (256-bit, shown once to user)
-  ├─ kdf(RK, "rec-wrap")  → RWK : encrypts the keyring on the server (recovery envelope)
-  └─ kdf(RK, "rec-sign")  → Ed25519 seed : proves recovery enrollment to the server
+Recovery Key RK (256-bit, shown once)
+  ├─ kdf(RK, 1, "clprecov") → X25519 seed → recovery box keypair   (keyrings are sealed to its PUBLIC key)
+  └─ kdf(RK, 2, "clprecov") → Ed25519 seed → recovery sign keypair  (recovery proof; recovered device's first signature)
 
-Vault keyring = { epoch 1: VK1, epoch 2: VK2, ... }   (256-bit random each, generated on a trusted device)
-  └─ VKe
-      ├─ wraps per-item DEKs created while e is current
-      └─ kdf(VKe, "hash")  → content-hash key (dedupe)
+Keyring (sealed + signed; never stored in clear outside OS secure storage)
+  ├─ keys:     { epoch 1: VK1, epoch 2: VK2, … }      256-bit random each
+  ├─ roster:   [ { deviceId, boxPublicKey, signPublicKey }, … ]   the authorized devices
+  └─ recovery: { boxPublicKey, signPublicKey, knownBy: [deviceId…] }   knownBy = devices that ever held the recovery key
 
-Item DEK (256-bit random, one per item)
-  ├─ meta ciphertext
-  └─ body / blob ciphertext
-
-Device keys (per device, never leave OS storage)
-  ├─ X25519 box keypair  : receives sealed keyrings
-  └─ Ed25519 sign keypair: signs keyrings it hands out
+VKe ── wraps per-item DEKs created while e is current
+VK1 ── kdf(VK1, 1, "clphash_") → content-hash key (stable across rotations)
+Item DEK (random per item) ── meta, body, thumb ciphertexts
+Device keys (never leave OS storage): X25519 box keypair, Ed25519 sign keypair
 ```
 
-Per-item DEKs mean key rotation and local-vault→account-vault migration re-wrap 72-byte DEKs instead of re-encrypting or re-uploading images.
+The roster and recovery public keys travel **inside** the authenticated keyring, never as server-supplied data. Devices seal new keyrings only to roster members and to the recovery key they already hold, so a server cannot add a device or redirect recovery.
 
 ## 4. Ciphertext format (encVersion 1)
 
-Every ciphertext is `nonce(24) || aead_ciphertext`. AAD binds each part to its place, so the server cannot swap ciphertexts between items or fields:
+Every AEAD ciphertext is `nonce(24) || ciphertext+tag`, with AAD binding it to its item and field:
 
 ```text
-AAD = "clipply/v1/" + itemId + "/" + part     part ∈ {dek, meta, body, thumb}
-dek  = AEAD(VKe,  DEK,                 AAD(dek))   ; keyEpoch e stored in clear
-meta = AEAD(DEK,  pad(JSON(ItemMeta)), AAD(meta))
-body = AEAD(DEK,  pad(content),        AAD(body))  ; or the Cloudinary blob for large content
-thumb = AEAD(DEK,  pad(webp thumbnail), AAD(thumb)) ; images only
+AAD   = "clipply/v1/" + itemId + "/" + part        part ∈ {dek, meta, body, thumb}
+dek   = AEAD(VKe, DEK,                   AAD(dek))   ; keyEpoch e in clear
+meta  = AEAD(DEK, pad(JSON(ItemMeta)),   AAD(meta))
+body  = AEAD(DEK, pad(content),          AAD(body))  ; inline or as the Cloudinary blob
+thumb = AEAD(DEK, pad(jpeg thumbnail),   AAD(thumb))
 ```
 
-`userId` is deliberately not in the AAD: items are created before any account exists (local-only mode), and binding to the globally unique item id already prevents swaps; different users never share a vault key. The body uses the same `body` AAD whether it travels inline or as a Cloudinary blob.
+`userId` is not in the AAD: items exist before any account (local-only mode) and the globally unique item id already prevents swaps; users never share a vault key. Decrypted metadata is validated with Zod (another device wrote it). Fixed vectors for the Kotlin implementation: `packages/crypto/vectors/item-v1.json`.
 
-The envelope signature covers `"clipply/v1/envelope/" + deviceId + "/" + epoch + "/" ‖ sealed`. The recovery envelope uses AAD `clipply/v1/recovery`. Recovery keys display as 55 Crockford base32 characters (key + 16-bit checksum) in groups of 5; parsing accepts lower case, spaces and I/L/O look-alikes.
+Envelope signature: Ed25519 over `"clipply/v1/envelope/" + deviceId + "/" + epoch + "/" ‖ sealed`. Recovery proof: Ed25519 over `"clipply/v1/recover/" + userId + "/" + deviceId + "/" + timestampMs`. Recovery keys display as 55 Crockford base32 characters (key + 16-bit checksum) in groups of 5; parsing accepts lower case, spaces and I/L/O look-alikes.
 
-Cross-platform vectors: `packages/crypto/vectors/item-v1.json` (fixed keys and nonces → exact bytes). The Kotlin implementation must reproduce them. The XChaCha20-Poly1305 primitive is also checked against draft-irtf-cfrg-xchacha §A.3.1.
+## 5. Protocols
 
-`encVersion` is in clear so the format can evolve; clients reject unknown versions.
+**Create vault (first device).** The device's local keyring becomes the account vault, so local history stays readable as-is. Roster = this device; a recovery key is generated, its public keys go into the keyring, and the device uploads its own signed envelope plus the keyring sealed to the recovery public key (`POST /vault/init`, once per account). The recovery key is shown once.
 
-## 5. Device enrollment
+**Enroll a device (code comparison).**
+1. New device N signs in → `pending`; it can reach no vault data.
+2. Authorized device T claims N (`POST /vault/claim/:id`); N learns T's public keys (`GET /vault/enrollment`).
+3. Both show a 12-digit code from `BLAKE2b("clipply/v1/sas/" ‖ pkN_box ‖ pkN_sign ‖ pkT_box ‖ pkT_sign)`. The user confirms the match **on both devices**; any substituted key changes the code.
+4. T adds N to the roster, seals the keyring to every roster member and to the recovery key (so a later recovery starts from the current roster), signs, publishes with `authorize: N`. The server authorizes N only if T is authorized and is the device that claimed it.
+5. N accepts only an envelope signed by the exact key it confirmed, and only if it is in the roster.
+6. N then re-keys its own local history into the account vault (`ClipLibrary.adoptKeyring`: re-wraps 72-byte DEKs, re-hashes text; bodies and images are not re-encrypted).
 
-A new device generates its keys locally, signs in with Google, and registers (`status: pending`). Getting the keyring requires one of:
+**Recover (recovery key).** N signs a fresh proof (±5 min) with the recovery sign key; the server verifies it against the recovery public key stored at init and authorizes N, then returns the recovery envelope. N opens it with the recovery box key, adds itself to the roster and to `recovery.knownBy`, and republishes envelopes (and the recovery copy) **signed with the recovery key**, which every roster member already trusts.
 
-**A. Approval from a trusted device (SAS-verified)**
-1. Trusted device T opens the pending request and posts its claim (its public keys).
-2. Both devices show a 12-digit code (`1234 5678 9012`, ~40 bits) from `BLAKE2b("clipply/v1/sas/"‖pkN_box‖pkN_sign‖pkT_box‖pkT_sign)`.
-3. User confirms the codes match **on both devices**. A server substituting either key makes them differ.
-4. T posts `KeyEnvelope{ sealed = box_seal(keyring, pkN_box), signature = sign_T(deviceId‖epoch‖sealed) }`; the server marks N authorized only when an authorized device posts it.
-5. N verifies the signature against the pkT it confirmed, opens the box, stores the keyring in OS storage.
+**Revoke and rotate.** An authorized device revokes D (server: status, sessions, D's envelope — immediate), then creates epoch e+1 with D removed from the roster, seals it to all remaining roster members and to the recovery public key from its own keyring (no recovery key needed), and publishes. The server raises `keyEpoch` and from then on rejects uploads under older epochs (`stale_epoch`); it also refuses a rotation that would leave out an authorized device. Old items stay under their epoch (D could already read them); new items use e+1. If D is in `recovery.knownBy` (it created the recovery key or recovered with it, so it may have kept a copy), the same rotation also replaces the recovery key and the new one is shown once.
 
-**B. Recovery key**
-1. User enters RK on N. N derives RWK and the recovery signing key.
-2. N proves possession by signing a server challenge; the server checks it against the stored recovery public key and authorizes N.
-3. N downloads and decrypts the recovery envelope (AEAD under RWK — the server cannot forge it), then seals the keyring to itself.
+**Replace the recovery key.** Any authorized device can replace a lost or exposed recovery key: a rotation (epoch e+1) whose keyring carries the new recovery public keys, `knownBy = [this device]`. The server swaps the stored recovery key only as part of a rotation, so the old key's sealed copy never covers new data, and from then on rejects recovery proofs signed by the old key.
 
-The first device of an account creates the keyring and RK, uploads its own envelope and the recovery envelope, and forces the user to save RK (shown once; confirmation by re-typing a group).
+**Refresh.** When `/vault/state` shows a new version, a device fetches its envelope and accepts it only if (a) it is signed by a device in its current roster or by the recovery key, (b) the keyring contains every key it already holds, byte-identical. If it is no longer in the roster, it treats itself as removed.
 
-## 6. Revocation and rotation
+## 6. Recovery and total loss
 
-1. An authorized device revokes D: server marks D revoked, deletes D's envelopes and refresh tokens; D's API calls fail immediately.
-2. The revoking device generates VK(e+1), builds keyring {…, e+1}, seals it to every remaining authorized device (signed), and replaces the recovery envelope.
-3. The server sets the account's `keyEpoch = e+1` and rejects new uploads under older epochs (`stale_epoch`), so offline devices must pick up the new keyring before writing.
-4. Existing items stay under their epoch: D could already read them; re-encrypting gains nothing. New items use e+1, which D never receives.
+If every authorized device **and** the recovery key are lost, the data is unrecoverable by design. The user can reset the vault (delete server ciphertext, start a new keyring). There is no server-side master key. The recovery key can be replaced from any authorized device (§5); the server accepts a new recovery signing key only together with a rotation.
 
-Keyring continuity: a device accepts a new keyring only if it contains every epoch key it already holds, byte-identical, and is signed by a device it trusts. A server alone cannot produce such a keyring.
+## 7. Threat model
 
-## 7. Recovery and total loss
-
-- RK can be re-generated from any authorized device (new RK → new recovery envelope + recovery public key; old RK stops working).
-- If every authorized device **and** RK are lost, the data is **unrecoverable by design**. The user can reset the vault, which deletes all server ciphertext and starts a new keyring. There is no server-side master key.
-
-## 8. Threat model
-
-Protected against: MongoDB or Cloudinary dump; curious or compromised server reading content; server swapping or replaying ciphertexts across items; server injecting its own vault key during enrollment (SAS + signatures); stolen refresh token on a revoked device; tampered ciphertext (AEAD fails, item shown as corrupt, never partially decrypted).
+Protected against (✓ = covered by automated tests):
+- Database / Cloudinary dump; server reading content ✓ (no plaintext in DB, logs or request bodies).
+- Vault keys, device private keys or the recovery key reaching the server ✓.
+- Server substituting keys during enrollment ✓ (code mismatch; envelope from an unconfirmed key rejected).
+- Server injecting a forged envelope or an extra device ✓ (roster + signature + continuity checks).
+- Revoked device reading items written after rotation ✓; revoked device using the API ✓.
+- Wrong / mistyped recovery key ✓; replayed or forged recovery proof ✓; ciphertext tampering, item or field swaps ✓.
+- Revoked device that held the recovery key re-joining with it ✓ (key replaced on revocation); old recovery key after replacement ✓.
 
 Not protected against (known limitations):
-- A compromised unlocked device (malware with the user's privileges reads the keyring from libsecret / process memory).
-- **Metadata**: the server sees account identity, device names/platforms, item counts, padded sizes, timing, IPs.
-- **Rollback/withholding**: the server can withhold changes or replay an older revision of an item; clients detect `rev` regressions only for items they already have.
-- **Revoked device + malicious server collusion**: until the signed device list (Phase 7) lands, a revoked device's still-valid signing key could be used by a colluding server to push a forged keyring to devices that have not yet seen the revocation.
-- Android crypto in the WebView keeps keys in JS memory while the app is open.
-
-## 9. Tests required (Phase 1 / 4)
-
-Round-trip for every part; tamper (bit flip, swapped AAD, wrong epoch) fails; nonce uniqueness; TS ↔ Kotlin vectors (fixed keys + nonces → identical bytes); envelope signature + continuity rejection; recovery derivation vectors; "no plaintext on the wire" test that intercepts API requests in an end-to-end run.
+- A compromised unlocked device (malware with the user's privileges).
+- **Metadata**: account identity, device names/platforms, item counts, padded sizes, timing, IPs.
+- **Rollback/withholding**: the server can withhold changes or replay an old item revision.
+- **Revoked device colluding with the server, against a device that has not yet refreshed**: until a device has processed the rotation, the revoked device's key is still in its roster, so a forged keyring signed by the revoked device would pass its checks. Devices refresh on every sync, which keeps the window small; closing it fully needs an ordered, signed revocation log.
+- Android keeps keys in WebView memory while the app is open.
+- **A malicious authorized device** can revoke others or replace the recovery key. Devices accept such changes because the device is in their roster; the UI shows the device list but does not yet alert on a recovery-key change.

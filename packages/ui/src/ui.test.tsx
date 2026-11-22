@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 import type { ClipKind } from '@clipply/shared-schemas';
 
-import { ClipList, ClipplyProvider, formatRelative, KindFilter, SearchBar, type ClipplyClient } from './index';
+import { ClipList, ClipplyProvider, formatBytes, formatRelative, ItemViewer, KindFilter, SearchBar, type ClipplyClient } from './index';
 
 const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
 
@@ -37,16 +37,24 @@ class FakeLibrary {
         return () => this.listeners.delete(cb);
       },
       readThumb: async () => null,
+      readBody: async (id) => new TextEncoder().encode(this.items.find((i) => i.id === id)?.preview ?? ''),
+      openUrl: vi.fn(async () => {}),
+      editText: async (id, text) => {
+        this.items = this.items.map((i) => (i.id === id ? { ...i, preview: text } : i));
+        emit();
+      },
       copy,
       setFlags: async (id, flags) => {
         this.items = this.items.map((i) => (i.id === id ? { ...i, meta: { ...i.meta, ...flags } } : i));
         emit();
       },
-      editText: async () => {},
       remove: async (ids) => {
         this.items = this.items.filter((i) => !ids.includes(i.id));
         emit();
       },
+      saveFile: async () => true,
+      storage: async () => ({ count: this.items.length, bytes: 0, kept: 0, byKind: {} }),
+      clear: async () => 0,
     };
   }
 }
@@ -110,6 +118,45 @@ describe('shared UI', () => {
 
     await user.click(within(screen.getAllByRole('article')[0]!).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+  });
+
+  it('selects several items and pins or deletes them together', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<ClipplyProvider client={lib.client()}><Screen /></ClipplyProvider>);
+    await screen.findAllByRole('article');
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const cards = screen.getAllByRole('button', { name: /^Select .* item$/ });
+    await user.click(cards[0]!);
+    await user.click(cards[1]!);
+    expect(screen.getByText('2 selected')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Pin selected' }));
+    await waitFor(() => expect(lib.list({ pinned: true })).toHaveLength(2));
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    await user.click(screen.getByRole('button', { name: 'Select all' }));
+    await user.click(screen.getByRole('button', { name: 'Delete selected' }));
+    await waitFor(() => expect(lib.list()).toHaveLength(0));
+  });
+
+  it('opens an item, edits its text and closes on Escape', async () => {
+    const user = userEvent.setup();
+    const client = lib.client();
+    const item = lib.list().find((i) => i.id === 'a')!;
+    const onClose = vi.fn();
+    render(<ClipplyProvider client={client}><ItemViewer item={item} onClose={onClose} /></ClipplyProvider>);
+    expect(await screen.findByText('grocery list')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Edit/ }));
+    const box = screen.getByLabelText('Edit text');
+    await user.clear(box);
+    await user.type(box, 'milk and eggs');
+    await user.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(lib.list().find((i) => i.id === 'a')?.preview).toBe('milk and eggs'));
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('formats byte sizes', () => {
+    expect([formatBytes(10), formatBytes(2048), formatBytes(5 * 1024 * 1024)]).toEqual(['10 B', '2.0 KB', '5.0 MB']);
   });
 
   it('shows an error state when the client fails', async () => {

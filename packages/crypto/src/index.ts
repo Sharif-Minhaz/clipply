@@ -5,3 +5,4 @@ export * from './keyring';
 export * from './item';
 export * from './device';
 export * from './recovery';
+export * from './backup';

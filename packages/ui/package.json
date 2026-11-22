@@ -14,7 +14,8 @@
   "dependencies": {
     "@clipply/shared-schemas": "*",
     "@clipply/sync-engine": "*",
-    "react": "^19.3.1"
+    "react": "^19.3.1",
+    "lucide-react": "^1.77.0"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.2",
