@@ -18,7 +18,7 @@ Status: **Phase 3 implemented** (`apps/server`). Express 5 + MongoDB driver 7 + 
 | `POST /auth/logout` | refresh token | Revokes the session |
 | `GET /devices` | any device of the account | List devices |
 | `PATCH /devices/:id` | any device | Rename |
-| `POST /devices/:id/revoke` | authorized device (or self) | Revoke: status, sessions (envelopes from Phase 4) |
+| `POST /devices/:id/revoke` | authorized device (or self) | Revoke: status, sessions, envelope. The revoked row refuses re-registration under its id and is purged by TTL 30 days later (`revokedAt`) |
 | `GET /sync/head` | authorized device | `{ seq, keyEpoch }` — cheap "anything new?" probe |
 | `GET /sync/pull?cursor&limit` | authorized device | Changes with `seq > cursor`, ≤ 500 per page, `410 cursor_expired` below the purge floor |
 | `POST /sync/push` | authorized device | ≤ 50 ops, one transaction; per-op `applied` / `conflict` / `stale_epoch` / `rejected` |

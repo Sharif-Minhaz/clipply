@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BackupPanel, buttonClass, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
+import { AppVersion, BackupPanel, buttonClass, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { DesktopStatus } from '../../electron/shared/api';
 import type { Settings } from '../../electron/main/settings';
@@ -35,7 +35,10 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 px-6 py-8">
-      <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+      <div className="flex items-baseline justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <span className="text-sm text-muted">Clipply <AppVersion client={window.clipply.updates} className="tabular-nums" /></span>
+      </div>
       {message && <p role="status" className="rounded-lg bg-clip/15 px-4 py-3 text-sm text-ink">{message}</p>}
 
       <SettingsSection title="Appearance">

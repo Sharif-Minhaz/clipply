@@ -30,6 +30,7 @@ function fake(initial: Partial<AccountStatus>, devices: DeviceInfo[] = []) {
     recover: vi.fn(async () => {}),
     devices: async () => devices,
     startApproval: vi.fn(async () => ({ code: '1111 2222 3333' })),
+    approvalCode: vi.fn(async () => ({ code: '4444 5555 6666' })),
     confirmApproval: vi.fn(async () => {}),
     revoke: vi.fn(async () => ({})),
     replaceRecoveryKey: vi.fn(async () => ({ recoveryKey: 'NEWKY-NEWKY' })),
@@ -42,6 +43,17 @@ function fake(initial: Partial<AccountStatus>, devices: DeviceInfo[] = []) {
 const dev = (p: Partial<DeviceInfo>): DeviceInfo => ({ id: 'd', name: 'Phone', platform: 'android', status: 'authorized', lastSeenAt: Date.now(), isThisDevice: false, ...p });
 
 describe('DevicesPanel', () => {
+  it('hides removed devices from the list', async () => {
+    const client = fake({ signedIn: true, email: 'me@example.com', vault: 'ready', deviceStatus: 'authorized' }, [
+      dev({ id: 'a', name: 'Laptop', platform: 'ubuntu', isThisDevice: true }),
+      dev({ id: 'b', name: 'Old phone', status: 'revoked' }),
+    ]);
+    render(<DevicesPanel account={client} />);
+    expect(await screen.findByText('Laptop')).toBeTruthy();
+    expect(screen.queryByText('Old phone')).toBeNull();
+    expect(screen.queryByText('Removed')).toBeNull();
+  });
+
   it('signs in and will not dismiss the recovery key until its last group is typed', async () => {
     const user = userEvent.setup();
     const client = fake({});

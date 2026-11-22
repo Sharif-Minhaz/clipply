@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { app, dialog, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { initCrypto } from '@clipply/crypto';
+import { generateDeviceKeys, initCrypto } from '@clipply/crypto';
 import { itemRepo, kvRepo, migrate } from '@clipply/database';
 import { openNodeSqlite } from '@clipply/database/node';
 import { createLogger } from '@clipply/logger';
@@ -163,6 +163,11 @@ async function main(): Promise<void> {
       db,
       library,
       identity: { deviceId: vault.deviceId, keys: vault.deviceKeys },
+      newIdentity: async () => {
+        vault = { ...vault!, deviceId: uuidv7(), deviceKeys: generateDeviceKeys() };
+        await writeVault(safeStorage, vaultPath, vault);
+        return { deviceId: vault.deviceId, keys: vault.deviceKeys };
+      },
       device: { name: hostname().slice(0, 64) || 'Ubuntu', platform: 'ubuntu', appVersion: app.getVersion() },
       getKeyring: () => vault!.keyring,
       setKeyring: async (ring) => {

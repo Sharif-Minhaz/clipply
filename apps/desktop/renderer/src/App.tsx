@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import logo from './logo.png';
 import { Clipboard, Laptop, Pause, Pin, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, ClipList, ItemViewer, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
+import { AddClip, AppVersion, ClipList, ItemViewer, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -47,6 +47,7 @@ export function App() {
         <div className="mb-5 flex items-center gap-2.5 px-2">
           <img src={logo} alt="" className="size-8 rounded-lg" />
           <span className="text-lg font-bold tracking-tight">Clipply</span>
+          <AppVersion client={window.clipply.updates} className="mt-1 text-xs text-frame-muted tabular-nums" />
         </div>
         {NAV.map(({ tab: t, label, icon: Icon }) => (
           <button

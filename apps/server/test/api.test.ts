@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createKeyring, rotateKeyring } from '@clipply/crypto';
 
+import { REVOKED_DEVICE_TTL_SECONDS } from '../src/db';
 import { loadConfig } from '../src/config';
 import { signParams } from '../src/modules/storage/cloudinary';
 import { restorePath } from '../src/vercel';
@@ -66,6 +67,16 @@ describe('auth', () => {
     expect((await request(h.app).post('/v1/auth/refresh').send({ refreshToken: b.refresh })).body).toEqual({ error: 'device_revoked' });
     const renamed = await request(h.app).patch(`/v1/devices/${a.id}`).set(...bearer(a)).send({ name: 'Laptop' });
     expect(renamed.body.name).toBe('Laptop');
+  });
+
+  it('stamps revoked devices for TTL purge and leaves live devices alone', async () => {
+    const a = await signIn(h, 'frida');
+    const b = await signIn(h, 'frida');
+    await request(h.app).post(`/v1/devices/${b.id}/revoke`).set(...bearer(a));
+    expect((await h.store.c.devices.findOne({ _id: b.id }))?.revokedAt).toBeInstanceOf(Date);
+    expect((await h.store.c.devices.findOne({ _id: a.id }))?.revokedAt).toBeUndefined();
+    const ttl = (await h.store.c.devices.indexes()).find((i) => i.key.revokedAt === 1);
+    expect(ttl?.expireAfterSeconds).toBe(REVOKED_DEVICE_TTL_SECONDS);
   });
 });
 

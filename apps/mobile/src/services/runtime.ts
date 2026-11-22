@@ -120,6 +120,12 @@ export async function boot(): Promise<Runtime> {
     db,
     library,
     identity: { deviceId: vault.deviceId, keys: vault.keys },
+    newIdentity: async () => {
+      // Saved before use so the background upload worker signs in under the same new id.
+      vault = { ...vault, deviceId: uuidv7(), keys: generateDeviceKeys() };
+      await saveVault(vault);
+      return { deviceId: vault.deviceId, keys: vault.keys };
+    },
     device: { name: (await ClipplyNative.deviceName()).name.slice(0, 64) || 'Android', platform: 'android', appVersion },
     getKeyring: () => vault.keyring,
     setKeyring: async (ring) => {
@@ -328,6 +334,7 @@ export async function boot(): Promise<Runtime> {
     recover: (k) => account.recover(k),
     devices: () => account.devices(),
     startApproval: (id) => account.startApproval(id),
+    approvalCode: (id) => account.approvalCode(id),
     confirmApproval: (id) => account.confirmApproval(id),
     revoke: (id) => account.revoke(id),
     rename: (id, name) => account.rename(id, name),
@@ -342,7 +349,9 @@ export async function boot(): Promise<Runtime> {
     client,
     account: accountClient,
     updates,
-    deviceId: vault.deviceId,
+    get deviceId() {
+      return vault.deviceId;
+    },
     settings: () => settings,
     async updateSettings(patch) {
       const next = MobileSettings.parse({ ...settings, ...patch });

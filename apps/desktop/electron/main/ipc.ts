@@ -138,6 +138,7 @@ export function registerIpc(d: IpcDeps): void {
   handle(CH.recover, z.tuple([z.string().min(40).max(120)]), (key) => acct().recover(key));
   handle(CH.devices, z.tuple([]), () => acct().devices());
   handle(CH.startApproval, z.tuple([Id]), (id) => acct().startApproval(id));
+  handle(CH.approvalCode, z.tuple([Id]), (id) => acct().approvalCode(id));
   handle(CH.confirmApproval, z.tuple([Id]), (id) => acct().confirmApproval(id));
   handle(CH.revoke, z.tuple([Id]), (id) => acct().revoke(id));
   handle(CH.rename, z.tuple([Id, DeviceName]), (id, name) => acct().rename(id, name));

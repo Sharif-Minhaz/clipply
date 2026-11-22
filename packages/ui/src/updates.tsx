@@ -32,6 +32,13 @@ export function useUpdateState(client: UpdateClient): [UpdateState | null, (s: U
   return [state, setState];
 }
 
+/** The installed version as `v1.2.3` (no network); renders nothing until it is known. */
+export function AppVersion({ client, className }: { client: UpdateClient; className?: string }) {
+  const [state] = useUpdateState(client);
+  if (!state) return null;
+  return <span className={className}>v{state.current}</span>;
+}
+
 /** Settings section body: current version, manual check, download link and the auto-check switch. */
 export function UpdatePanel({ client, autoCheck, onAutoCheck }: { client: UpdateClient; autoCheck: boolean; onAutoCheck: (on: boolean) => void }) {
   const [state, setState] = useUpdateState(client);

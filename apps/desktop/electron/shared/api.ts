@@ -37,6 +37,7 @@ export const CH = {
   recover: 'account:recover',
   devices: 'devices:list',
   startApproval: 'devices:start-approval',
+  approvalCode: 'devices:approval-code',
   confirmApproval: 'devices:confirm-approval',
   revoke: 'devices:revoke',
   rename: 'devices:rename',
@@ -105,11 +106,12 @@ export interface DesktopApi {
     signIn(): Promise<{ recoveryKey?: string }>;
     signOut(): Promise<void>;
     syncNow(): Promise<void>;
-    enrollment(): Promise<{ approverName: string; code: string } | null>;
+    enrollment(): Promise<{ approverName: string; code: string; approved?: boolean } | null>;
     acceptEnrollment(): Promise<void>;
     recover(recoveryKey: string): Promise<void>;
     devices(): Promise<DeviceInfo[]>;
     startApproval(deviceId: string): Promise<{ code: string }>;
+    approvalCode(deviceId: string): Promise<{ code: string }>;
     confirmApproval(deviceId: string): Promise<void>;
     revoke(deviceId: string): Promise<{ recoveryKey?: string }>;
     rename(deviceId: string, name: string): Promise<void>;

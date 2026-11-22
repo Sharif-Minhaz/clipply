@@ -1,5 +1,5 @@
 import { createApiClient, ApiError, type ApiClient } from '@clipply/api-client';
-import { toB64, type Keyring } from '@clipply/crypto';
+import { rosterEntry, toB64, type Keyring } from '@clipply/crypto';
 import { kvRepo, outboxRepo, type SqlDb } from '@clipply/database';
 import type { Logger } from '@clipply/logger';
 import type { DevicePlatform } from '@clipply/shared-schemas';
@@ -48,6 +48,12 @@ export interface AccountDeps {
   db: SqlDb;
   library: ClipLibrary;
   identity: DeviceIdentity;
+  /**
+   * Persists and returns a fresh device id and key pairs, keeping the keyring and local history.
+   * Used when this device was removed from the account: the server never lets a removed id back
+   * in, so signing in again registers it as a new device that must be approved.
+   */
+  newIdentity?: () => Promise<DeviceIdentity>;
   device: { name: string; platform: DevicePlatform; appVersion: string };
   getKeyring: () => Keyring;
   /** Persists the keyring in OS-protected storage. */
@@ -82,9 +88,11 @@ export class AccountController {
   private debounce: ReturnType<typeof setTimeout> | null = null;
   private paused = false;
   private readonly now: () => number;
+  private identity: DeviceIdentity;
 
   constructor(private readonly d: AccountDeps) {
     this.now = d.now ?? Date.now;
+    this.identity = d.identity;
     this.status = { configured: !!d.baseUrl, signedIn: false, vault: 'none', sync: { state: 'off', pending: 0 } };
     this.api = createApiClient({
       baseUrl: d.baseUrl ?? 'http://invalid.localhost',
@@ -144,14 +152,25 @@ export class AccountController {
   async signIn(): Promise<{ recoveryKey?: string }> {
     if (!this.d.baseUrl) throw new Error('sync is not configured in this build');
     const idToken = await this.d.googleIdToken();
-    const { identity: me, device } = this.d;
-    const auth = await this.api.signInWithGoogle({
-      idToken,
-      device: {
-        id: me.deviceId, name: device.name, platform: device.platform, appVersion: device.appVersion,
-        keys: { boxPublicKey: toB64(me.keys.box.publicKey), signPublicKey: toB64(me.keys.sign.publicKey) },
-      },
-    });
+    const register = () => {
+      const { device } = this.d;
+      return this.api.signInWithGoogle({
+        idToken,
+        device: { id: this.identity.deviceId, name: device.name, platform: device.platform, appVersion: device.appVersion, keys: this.publicKeys() },
+      });
+    };
+    let auth: Awaited<ReturnType<typeof register>>;
+    try {
+      auth = await register();
+    } catch (error) {
+      const removed = error instanceof ApiError && error.status === 403 && error.message.endsWith('device_revoked');
+      if (!removed || !this.d.newIdentity) throw error;
+      // This device was removed from the account: come back as a new device (needs approval).
+      this.identity = await this.d.newIdentity();
+      this.shownApprover = null;
+      this.d.library.setDeviceId(this.identity.deviceId);
+      auth = await register();
+    }
     this.session = { userId: auth.user.id, email: auth.user.email, refreshToken: auth.refreshToken, accessToken: auth.accessToken, accessExpiresAt: auth.accessExpiresAt };
     await this.d.saveSession(this.session);
     this.update({ signedIn: true, email: auth.user.email, deviceStatus: auth.device.status });
@@ -170,7 +189,7 @@ export class AccountController {
 
   /** Works out where this device stands and creates the account vault if it is the first device. */
   private async refreshState(): Promise<{ recoveryKey?: string }> {
-    const me = (await this.api.listDevices()).devices.find((x) => x.id === this.d.identity.deviceId);
+    const me = (await this.api.listDevices()).devices.find((x) => x.id === this.identity.deviceId);
     const deviceStatus = me?.status ?? 'revoked';
     this.update({ deviceStatus });
     if (deviceStatus === 'revoked') {
@@ -182,8 +201,14 @@ export class AccountController {
       return {};
     }
     const state = await this.api.vaultState();
+    if (state.initialized && !rosterEntry(this.d.getKeyring(), this.identity.deviceId)) {
+      // Authorized on the server but never took the keyring (e.g. the app closed before
+      // "Codes match"): there is nothing local to verify an envelope against, so join again.
+      this.update({ vault: 'needs_enrollment', sync: { ...this.status.sync, state: 'off' } });
+      return {};
+    }
     if (!state.initialized) {
-      const { ring, recoveryKey } = await createAccountVault(this.api, this.d.identity, this.d.getKeyring());
+      const { ring, recoveryKey } = await createAccountVault(this.api, this.identity, this.d.getKeyring());
       await this.d.setKeyring(ring);
       await kvRepo(this.d.db).set(VAULT_VERSION, 1);
       this.update({ vault: 'ready' });
@@ -200,7 +225,7 @@ export class AccountController {
     const state = await this.api.vaultState();
     const known = (await kvRepo(this.d.db).get<number>(VAULT_VERSION)) ?? 0;
     if (!force && state.version === known) return;
-    const res = await refreshKeyring(this.api, this.d.identity, this.d.getKeyring());
+    const res = await refreshKeyring(this.api, this.identity, this.d.getKeyring());
     if (res.status === 'removed') {
       this.update({ vault: 'removed' });
       throw new Error('this device was removed from the vault');
@@ -213,7 +238,16 @@ export class AccountController {
   // ── enrollment: new-device side ────────────────────────────────────────────────────────
 
   /** Pending device: who claimed us and the code to compare, or null while nobody has. */
-  async enrollment(): Promise<{ approverName: string; code: string } | null> {
+  async enrollment(): Promise<{ approverName: string; code: string; approved?: boolean } | null> {
+    if (this.status.deviceStatus === 'authorized') {
+      // Already approved, but the keyring was never accepted here. Its envelope's signer is the
+      // device to compare codes with (it shows them under "Show code").
+      if (!this.shownApprover) {
+        const { signer } = await this.api.envelope();
+        this.shownApprover = { ...signer, code: enrollmentCodeFor(this.publicKeys(), signer.keys) };
+      }
+      return { approverName: this.shownApprover.name, code: this.shownApprover.code, approved: true };
+    }
     const { approver } = await this.api.enrollment();
     if (!approver) return this.shownApprover ? { approverName: this.shownApprover.name, code: this.shownApprover.code } : null;
     const code = enrollmentCodeFor(this.publicKeys(), approver.keys);
@@ -228,13 +262,13 @@ export class AccountController {
   async acceptEnrollment(): Promise<void> {
     const approver = this.shownApprover;
     if (!approver) throw new Error('no device has started approving this one');
-    await this.join(await acceptEnrollment(this.api, this.d.identity, approver));
+    await this.join(await acceptEnrollment(this.api, this.identity, approver));
     this.shownApprover = null;
   }
 
   async recover(recoveryKey: string): Promise<void> {
     if (!this.session) throw new Error('sign in first');
-    await this.join(await recoverVault(this.api, this.d.identity, this.session.userId, recoveryKey, this.now()));
+    await this.join(await recoverVault(this.api, this.identity, this.session.userId, recoveryKey, this.now()));
   }
 
   private async join(ring: Keyring): Promise<void> {
@@ -257,7 +291,7 @@ export class AccountController {
     return (await this.api.listDevices()).devices.map((x) => ({
       id: x.id, name: x.name, platform: x.platform, status: x.status, lastSeenAt: x.lastSeenAt,
       ...(x.lastSyncAt !== undefined ? { lastSyncAt: x.lastSyncAt } : {}),
-      isThisDevice: x.id === this.d.identity.deviceId,
+      isThisDevice: x.id === this.identity.deviceId,
     }));
   }
 
@@ -269,25 +303,35 @@ export class AccountController {
     return { code: enrollmentCodeFor(pending.keys, this.publicKeys()) };
   }
 
+  /**
+   * The code for an already-approved device that never accepted its keyring, so the user can
+   * compare it with the one that device shows when it joins again.
+   */
+  async approvalCode(deviceId: string): Promise<{ code: string }> {
+    const d = (await this.api.listDevices()).devices.find((x) => x.id === deviceId && x.status === 'authorized');
+    if (!d) throw new Error('device is not connected');
+    return { code: enrollmentCodeFor(d.keys, this.publicKeys()) };
+  }
+
   /** After the user confirmed the codes match on this device. */
   async confirmApproval(deviceId: string): Promise<void> {
     const pending = (await this.api.listDevices()).devices.find((x) => x.id === deviceId && x.status === 'pending');
     if (!pending) throw new Error('device is not waiting for approval');
-    await this.d.setKeyring(await approveDevice(this.api, this.d.identity, this.d.getKeyring(), { id: deviceId, keys: pending.keys }));
+    await this.d.setKeyring(await approveDevice(this.api, this.identity, this.d.getKeyring(), { id: deviceId, keys: pending.keys }));
     await kvRepo(this.d.db).set(VAULT_VERSION, (await this.api.vaultState()).version);
     this.emit();
   }
 
   /** Returns a new recovery key when the removed device had held the old one (show it once). */
   async revoke(deviceId: string): Promise<{ recoveryKey?: string }> {
-    const { ring, recoveryKey } = await revokeAndRotate(this.api, this.d.identity, this.d.getKeyring(), deviceId);
+    const { ring, recoveryKey } = await revokeAndRotate(this.api, this.identity, this.d.getKeyring(), deviceId);
     await this.adoptRotation(ring);
     return recoveryKey ? { recoveryKey } : {};
   }
 
   /** Replaces the recovery key (lost or exposed); the old one stops working. Show the new one once. */
   async replaceRecoveryKey(): Promise<{ recoveryKey: string }> {
-    const { ring, recoveryKey } = await replaceRecoveryKey(this.api, this.d.identity, this.d.getKeyring());
+    const { ring, recoveryKey } = await replaceRecoveryKey(this.api, this.identity, this.d.getKeyring());
     await this.adoptRotation(ring);
     return { recoveryKey };
   }
@@ -415,7 +459,7 @@ export class AccountController {
   }
 
   private publicKeys(): DevicePublicKeys {
-    return { boxPublicKey: toB64(this.d.identity.keys.box.publicKey), signPublicKey: toB64(this.d.identity.keys.sign.publicKey) };
+    return { boxPublicKey: toB64(this.identity.keys.box.publicKey), signPublicKey: toB64(this.identity.keys.sign.publicKey) };
   }
 
   private update(patch: Partial<AccountStatus>): void {

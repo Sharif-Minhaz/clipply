@@ -36,9 +36,10 @@ export function deviceRoutes(store: Store, now: () => number): Router {
     const a = requireAuth(req);
     const id = parse(DeviceId, req.params.id);
     if (id !== a.deviceId && a.device.status !== 'authorized') throw new HttpError(403, 'device_not_authorized');
+    const at = new Date(now());
     const updated = await store.c.devices.findOneAndUpdate(
       { _id: id, userId: a.userId },
-      { $set: { status: 'revoked', lastSeenAt: new Date(now()) } },
+      { $set: { status: 'revoked', lastSeenAt: at, revokedAt: at } },
       { returnDocument: 'after' },
     );
     if (!updated) throw new HttpError(404, 'device_not_found');

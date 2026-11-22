@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BackupPanel, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
+import { AppVersion, BackupPanel, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { MobileSettings, Runtime } from '../services/runtime';
 
@@ -17,7 +17,10 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
 
   return (
     <div className="space-y-4 px-4 py-6">
-      <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+      <div className="flex items-baseline justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <span className="text-sm text-muted">Clipply <AppVersion client={rt.updates} className="tabular-nums" /></span>
+      </div>
       {note && <p role="status" className="rounded-lg bg-clip/15 px-4 py-3 text-sm">{note}</p>}
       <SettingsSection title="Appearance">
         <div className="space-y-2">

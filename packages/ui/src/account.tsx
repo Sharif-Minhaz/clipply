@@ -12,11 +12,14 @@ export interface AccountClient {
   signIn(): Promise<{ recoveryKey?: string }>;
   signOut(): Promise<void>;
   syncNow(): Promise<void>;
-  enrollment(): Promise<{ approverName: string; code: string } | null>;
+  /** `approved`: the server already authorized this device; only the codes are left to compare. */
+  enrollment(): Promise<{ approverName: string; code: string; approved?: boolean } | null>;
   acceptEnrollment(): Promise<void>;
   recover(recoveryKey: string): Promise<void>;
   devices(): Promise<DeviceInfo[]>;
   startApproval(deviceId: string): Promise<{ code: string }>;
+  /** For an approved device that never accepted its keyring and is joining again. */
+  approvalCode(deviceId: string): Promise<{ code: string }>;
   confirmApproval(deviceId: string): Promise<void>;
   /** Resolves with a new recovery key when the removed device had held the old one. */
   revoke(deviceId: string): Promise<{ recoveryKey?: string }>;
@@ -87,7 +90,7 @@ function RecoveryKeyNotice({ recoveryKey, replaced, onDone }: { recoveryKey: str
 }
 
 function Enrollment({ account }: { account: AccountClient }) {
-  const [pending, setPending] = useState<{ approverName: string; code: string } | null>(null);
+  const [pending, setPending] = useState<{ approverName: string; code: string; approved?: boolean } | null>(null);
   const [mode, setMode] = useState<'device' | 'recovery'>('device');
   const [key, setKey] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +141,11 @@ function Enrollment({ account }: { account: AccountClient }) {
       {mode === 'device' ? (
         pending ? (
           <div className="space-y-3">
-            <p className="text-sm text-muted">{pending.approverName} is approving this device. Check that it shows the same code:</p>
+            <p className="text-sm text-muted">
+              {pending.approved
+                ? <>{pending.approverName} approved this device, but setup did not finish. On {pending.approverName}, open Devices and tap Show code next to this device. Check that it shows the same code:</>
+                : <>{pending.approverName} is approving this device. Check that it shows the same code:</>}
+            </p>
             <Code code={pending.code} />
             <p className="text-xs text-muted">If the codes differ, do not continue — someone may be intercepting the connection.</p>
             <Button tone="primary" disabled={busy} onClick={() => void run(() => account.acceptEnrollment())}>
@@ -168,6 +175,7 @@ function Enrollment({ account }: { account: AccountClient }) {
 function DeviceRow(props: { device: DeviceInfo; account: AccountClient; onChanged: () => void; onRecoveryKey: (key: string) => void; canManage: boolean }) {
   const { device, account, onChanged, canManage } = props;
   const [code, setCode] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(device.name);
   const [error, setError] = useState<string | null>(null);
@@ -211,6 +219,11 @@ function DeviceRow(props: { device: DeviceInfo; account: AccountClient; onChange
         {canManage && device.status === 'pending' && !code && (
           <Button tone="primary" onClick={() => void account.startApproval(device.id).then((r) => setCode(r.code), (e: unknown) => setError(message(e)))}>Approve</Button>
         )}
+        {canManage && device.status === 'authorized' && !device.isThisDevice && device.lastSyncAt === undefined && !joinCode && (
+          <Button onClick={() => void account.approvalCode(device.id).then((r) => setJoinCode(r.code), (e: unknown) => setError(message(e)))}>
+            <ShieldCheck aria-hidden className="size-4" /> Show code
+          </Button>
+        )}
         {canManage && device.status === 'authorized' && !device.isThisDevice && (
           <Button
             tone="danger"
@@ -232,6 +245,13 @@ function DeviceRow(props: { device: DeviceInfo; account: AccountClient; onChange
             </Button>
             <Button onClick={() => setCode(null)}>Cancel</Button>
           </div>
+        </div>
+      )}
+      {joinCode && (
+        <div className="space-y-2 rounded-md bg-surface p-3">
+          <p className="text-sm text-muted">If {device.name} has not finished setup, check that it shows this code, then tap Codes match on {device.name}:</p>
+          <Code code={joinCode} />
+          <Button onClick={() => setJoinCode(null)}>Close</Button>
         </div>
       )}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
@@ -332,13 +352,14 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
       )}
       {status.signedIn && status.vault === 'needs_enrollment' && <Enrollment account={account} />}
       {status.vault === 'removed' && (
-        <Card><p className="text-sm text-danger">This device was removed from your account. Local history stays here; sign out and sign in again to reconnect it.</p></Card>
+        <Card><p className="text-sm text-danger">This device was removed from your account. Local history stays here; to reconnect it, sign out and sign in again, then approve it from a connected device.</p></Card>
       )}
       {status.signedIn && devices && (
         <Card>
           <h2 className="text-base font-bold">Devices</h2>
           <ul className="space-y-2.5">
-            {devices.map((d) => (
+            {/* Removed devices stay on the server as tombstones (blocking re-registration) until purged; not worth showing. */}
+            {devices.filter((d) => d.status !== 'revoked').map((d) => (
               <DeviceRow key={d.id} device={d} account={account} canManage={ready} onChanged={loadDevices} onRecoveryKey={(key) => setRecoveryKey({ key, replaced: true })} />
             ))}
           </ul>

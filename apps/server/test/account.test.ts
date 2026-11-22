@@ -31,10 +31,11 @@ async function app(sub: string, name: string) {
   await migrate(db);
   let ring: Keyring = createKeyring();
   let session: StoredSession | null = null;
-  const identity = { deviceId: randomUUID(), keys: generateDeviceKeys() };
+  let identity = { deviceId: randomUUID(), keys: generateDeviceKeys() };
   const library: ClipLibrary = new ClipLibrary({ db, keyring: () => ring, deviceId: identity.deviceId, now: () => h.clock.now, fetchBlob: (id) => account.engine.fetchBlob(id) });
   const account: AccountController = new AccountController({
     baseUrl, db, library, identity, now: () => h.clock.now,
+    newIdentity: async () => (identity = { deviceId: randomUUID(), keys: generateDeviceKeys() }),
     device: { name, platform: 'ubuntu', appVersion: '0.1.0' },
     getKeyring: () => ring,
     setKeyring: async (r) => void (ring = r),
@@ -96,6 +97,62 @@ describe('AccountController (shared by desktop and Android)', () => {
     await phone.account.sync();
     expect(phone.account.getStatus()).toMatchObject({ vault: 'removed', deviceStatus: 'revoked' });
     h.clock.now -= 20 * 60_000;
+  });
+
+  it('finishes setup when the app closed after approval but before "Codes match"', async () => {
+    const laptop = await app('uma', 'Laptop');
+    await laptop.account.signIn();
+    const phone = await app('uma', 'Phone');
+    await phone.account.signIn();
+    const pending = (await laptop.account.devices()).find((d) => d.status === 'pending')!;
+    await laptop.account.startApproval(pending.id);
+    await laptop.account.confirmApproval(pending.id);
+
+    // Next launch: authorized on the server, but the keyring was never taken. No sync error.
+    await phone.account.init();
+    expect(phone.account.getStatus()).toMatchObject({ deviceStatus: 'authorized', vault: 'needs_enrollment' });
+    expect(phone.account.getStatus().sync.error).toBeUndefined();
+    const { code } = await laptop.account.approvalCode(pending.id);
+    expect(await phone.account.enrollment()).toEqual({ approverName: 'Laptop', code, approved: true });
+    await phone.account.acceptEnrollment();
+    expect(phone.account.getStatus()).toMatchObject({ vault: 'ready' });
+    await phone.library.capture({ type: 'text', text: 'after late setup' });
+    await phone.account.sync();
+    expect(phone.account.getStatus().sync).toMatchObject({ state: 'idle', pending: 0 });
+  });
+
+  it('a removed device signs out and back in as a new device, keeping its history', async () => {
+    const laptop = await app('vera', 'Laptop');
+    await laptop.account.signIn();
+    const phone = await app('vera', 'Phone');
+    await phone.library.capture({ type: 'text', text: 'old phone note' });
+    await phone.account.signIn();
+    const first = (await laptop.account.devices()).find((d) => d.status === 'pending')!;
+    await laptop.account.startApproval(first.id);
+    await phone.account.enrollment();
+    await laptop.account.confirmApproval(first.id);
+    await phone.account.acceptEnrollment();
+    await laptop.account.revoke(first.id);
+    await phone.account.sync();
+    expect(phone.account.getStatus().vault).toBe('removed');
+
+    await phone.account.signOut();
+    await phone.account.signIn();
+    expect(phone.account.getStatus()).toMatchObject({ deviceStatus: 'pending', vault: 'needs_enrollment' });
+    const devices = await laptop.account.devices();
+    const second = devices.find((d) => d.status === 'pending')!;
+    expect(second.id).not.toBe(first.id);
+    expect(devices.find((d) => d.id === first.id)?.status).toBe('revoked');
+
+    const { code } = await laptop.account.startApproval(second.id);
+    expect(await phone.account.enrollment()).toEqual({ approverName: 'Laptop', code });
+    await laptop.account.confirmApproval(second.id);
+    await phone.account.acceptEnrollment();
+    await phone.account.sync();
+    expect(phone.account.getStatus()).toMatchObject({ vault: 'ready', sync: { state: 'idle', pending: 0 } });
+    const [only] = phone.library.list();
+    expect(phone.library.list()).toHaveLength(1);
+    expect(fromUtf8(await phone.library.readBody(only!.id))).toBe('old phone note');
   });
 
   it('signs out without losing local history and resumes on next start', async () => {

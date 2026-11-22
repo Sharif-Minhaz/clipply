@@ -23,7 +23,12 @@ export type DeviceDoc = Omit<Device, 'id' | 'createdAt' | 'lastSeenAt' | 'lastSy
   lastSyncAt?: Date;
   /** Pending device claimed by an authorized device that will enroll it. */
   enrollment?: { approverId: string; at: Date };
+  /** Set on revoke; the TTL index purges the tombstone after REVOKED_DEVICE_TTL_SECONDS. */
+  revokedAt?: Date;
 };
+
+/** How long a revoked device row is kept, refusing re-registration under its id, before it is purged. */
+export const REVOKED_DEVICE_TTL_SECONDS = 30 * 86_400;
 
 export type EnvelopeDoc = KeyEnvelope & { _id: string; userId: string; updatedAt: Date };
 
@@ -125,6 +130,10 @@ export async function ensureIndexes(c: Collections): Promise<void> {
   await Promise.all([
     c.users.createIndex({ googleSub: 1 }, { unique: true }),
     c.devices.createIndex({ userId: 1 }),
+    // Only docs with a Date `revokedAt` expire, so live devices are never touched.
+    c.devices.createIndex({ revokedAt: 1 }, { expireAfterSeconds: REVOKED_DEVICE_TTL_SECONDS }),
+    // Backfill for devices revoked before `revokedAt` existed (their revoke stamped lastSeenAt).
+    c.devices.updateMany({ status: 'revoked', revokedAt: { $exists: false } }, [{ $set: { revokedAt: '$lastSeenAt' } }]),
     c.sessions.createIndex({ tokenHash: 1 }, { unique: true }),
     c.sessions.createIndex({ previousHash: 1 }, { sparse: true }),
     c.sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),

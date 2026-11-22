@@ -51,6 +51,7 @@ const api: DesktopApi = {
     recover: (key) => ipcRenderer.invoke(CH.recover, key),
     devices: () => ipcRenderer.invoke(CH.devices),
     startApproval: (id) => ipcRenderer.invoke(CH.startApproval, id),
+    approvalCode: (id) => ipcRenderer.invoke(CH.approvalCode, id),
     confirmApproval: (id) => ipcRenderer.invoke(CH.confirmApproval, id),
     revoke: (id) => ipcRenderer.invoke(CH.revoke, id),
     rename: (id, name) => ipcRenderer.invoke(CH.rename, id, name),

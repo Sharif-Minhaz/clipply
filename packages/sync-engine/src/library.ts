@@ -137,9 +137,14 @@ export class ClipLibrary {
   private readonly tx: Transactor;
   private readonly now: () => number;
 
-  constructor(private readonly deps: LibraryDeps) {
+  constructor(private deps: LibraryDeps) {
     this.tx = new Transactor(deps.db);
     this.now = deps.now ?? Date.now;
+  }
+
+  /** New clips are attributed to this id after the device re-registers under a new one. */
+  setDeviceId(deviceId: string): void {
+    this.deps = { ...this.deps, deviceId };
   }
 
   /** Decrypts every stored item into the in-memory index. Unreadable items are counted, not thrown. */
