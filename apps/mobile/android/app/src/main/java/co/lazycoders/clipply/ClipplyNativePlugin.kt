@@ -70,11 +70,15 @@ class ClipplyNativePlugin : Plugin() {
         when (val clip = readClip(context)) {
             Clip.None, Clip.TooLarge, is Clip.FileData -> out.put("type", "none")
             Clip.Sensitive -> out.put("type", "sensitive")
-            is Clip.Text -> out.put("type", "text").put("text", clip.text)
-            is Clip.Image -> out.put("type", "image").put("mime", clip.mime).put("data", Base64.encodeToString(clip.bytes, Base64.NO_WRAP))
+            is Clip.Text -> out.put("type", "text").put("text", clip.text).put("timestamp", clipTimestamp())
+            is Clip.Image -> out.put("type", "image").put("mime", clip.mime).put("data", Base64.encodeToString(clip.bytes, Base64.NO_WRAP)).put("timestamp", clipTimestamp())
         }
         call.resolve(out)
     }
+
+    /** When the current clip was set (API 26+), so the app can tell an unchanged clipboard from a new copy. */
+    private fun clipTimestamp(): Long =
+        if (Build.VERSION.SDK_INT >= 26) context.getSystemService(ClipboardManager::class.java).primaryClipDescription?.timestamp ?: 0 else 0
 
     @PluginMethod
     fun writeClipboardText(call: PluginCall) = guard(call) {

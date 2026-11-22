@@ -4,6 +4,8 @@ import { B64, Id, KeyEpoch, Millis, Rev, Seq } from './primitives';
 
 /** Inline body cap (base64url chars, ~48 KB ciphertext). With MAX_PUSH_OPS it keeps a push under Vercel's 4.5 MB body limit. */
 export const INLINE_BODY_MAX = 65_536;
+/** Thumbnail budget on capture: once padded, encrypted and base64-encoded it stays under INLINE_BODY_MAX. */
+export const MAX_THUMB_BYTES = 40 * 1024;
 
 export const ClipKind = z.enum(['text', 'url', 'html', 'code', 'image', 'file']);
 export type ClipKind = z.infer<typeof ClipKind>;

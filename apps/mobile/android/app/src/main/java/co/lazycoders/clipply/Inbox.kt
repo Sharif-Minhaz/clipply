@@ -18,9 +18,10 @@ object Inbox {
     private fun dir(ctx: Context) = File(ctx.noBackupFilesDir, "inbox").apply { mkdirs() }
 
     /** Returns false when the payload is empty or larger than one encrypted blob may be. */
-    fun add(ctx: Context, type: String, mime: String, data: ByteArray, source: String, name: String? = null): Boolean {
+    /** `createdAt`: when the content was made (a screenshot's MediaStore time), defaulting to now. */
+    fun add(ctx: Context, type: String, mime: String, data: ByteArray, source: String, name: String? = null, createdAt: Long? = null): Boolean {
         if (data.isEmpty() || data.size > MAX_BYTES) return false
-        val now = System.currentTimeMillis()
+        val now = createdAt ?: System.currentTimeMillis()
         val id = UUID.randomUUID().toString()
         val json = JSONObject()
             .put("id", id).put("createdAt", now).put("type", type).put("mime", mime).put("source", source)

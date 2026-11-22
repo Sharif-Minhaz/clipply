@@ -123,26 +123,30 @@ export async function boot(): Promise<Runtime> {
     log: log.child('account'),
   });
   const account = controller;
-  await account.init();
+  // Network work (device list, vault state, key refresh) must not hold up the first screen: history
+  // is local. Status updates reach the UI when it finishes; init starts the first sync itself.
+  const accountReady = account.init().catch((error: unknown) => log.warn('account init failed', { error }));
 
   let lastSelfWrite: string | null = null;
-  const capture = async (entry: Pick<InboxEntry, 'type' | 'mime' | 'data' | 'name'> & { text?: string }): Promise<void> => {
+  /** `createdAt` set (inbox entries): keep the original time, so a screenshot taken while Clipply was closed sorts where it happened. */
+  const capture = async (entry: Pick<InboxEntry, 'type' | 'mime' | 'data' | 'name'> & { text?: string; createdAt?: number }): Promise<void> => {
     if (!settings.monitoring) return;
+    const restore = entry.createdAt ? { createdAt: entry.createdAt, pinned: false, favorite: false } : undefined;
     if (entry.type === 'text') {
       const text = entry.text ?? fromUtf8(b64ToBytes(entry.data));
       if (text === lastSelfWrite) return;
-      await library.capture({ type: 'text', text });
+      await library.capture({ type: 'text', text }, restore);
       return;
     }
     const data = b64ToBytes(entry.data);
     if (entry.type === 'file') {
-      await library.capture({ type: 'file', mime: entry.mime, data, name: entry.name ?? 'file' });
+      await library.capture({ type: 'file', mime: entry.mime, data, name: entry.name ?? 'file' }, restore);
       return;
     }
     // An image the WebView cannot decode (e.g. HEIC) is still kept, just without a thumbnail.
     const decoded = await decodeImage(data, entry.mime).catch(() => null);
     if (!decoded) log.warn('image kept without thumbnail', { mime: entry.mime });
-    await library.capture({ type: 'image', mime: entry.mime, data, ...(decoded ? { thumb: decoded.thumb, pixels: decoded.pixels } : {}) });
+    await library.capture({ type: 'image', mime: entry.mime, data, ...(decoded ? { thumb: decoded.thumb, pixels: decoded.pixels } : {}) }, restore);
   };
 
   const drainInbox = async (): Promise<void> => {
@@ -156,22 +160,34 @@ export async function boot(): Promise<Runtime> {
     }
   };
 
-  const readClipboard = async (): Promise<string> => {
+  /**
+   * `auto` (window focus): skip a clipboard that has not changed since the last read. Re-saving it would
+   * count as a fresh copy and move old text above newer clips (a screenshot taken meanwhile).
+   */
+  const readClipboard = async (auto = false): Promise<string> => {
     const clip = await ClipplyNative.readClipboard();
     if (clip.type === 'sensitive') return 'Skipped: the clipboard holds sensitive content.';
     if (clip.type === 'none') return 'The clipboard is empty.';
-    if (clip.type === 'text' && clip.text) await capture({ type: 'text', mime: 'text/plain', data: '', text: clip.text });
+    const ts = clip.timestamp ?? 0;
+    if (auto && ts > 0 && ts <= ((await kv.get<number>('clipboard.lastTimestamp')) ?? 0)) return 'Already saved.';
+    if (ts > 0) await kv.set('clipboard.lastTimestamp', ts);
+    // Saved on open: date it when it was copied (Android records that), not when Clipply opened.
+    const when = auto && ts > 0 ? { createdAt: ts } : {};
+    if (clip.type === 'text' && clip.text) await capture({ type: 'text', mime: 'text/plain', data: '', text: clip.text, ...when });
     if (clip.type === 'image' && clip.data && clip.mime) {
-      await capture({ type: 'image', mime: clip.mime, data: clip.data });
+      await capture({ type: 'image', mime: clip.mime, data: clip.data, ...when });
       return 'Image saved.';
     }
     return 'Saved.';
   };
 
   // Foreground capture: the OS allows reading the clipboard only while our window has focus.
-  await ClipplyNative.addListener('windowFocus', () => {
-    if (settings.captureOnOpen && settings.monitoring) void readClipboard().catch((error: unknown) => log.warn('clipboard read failed', { error }));
-  });
+  const captureOnFocus = (): void => {
+    if (settings.captureOnOpen && settings.monitoring) void readClipboard(true).catch((error: unknown) => log.warn('clipboard read failed', { error }));
+  };
+  await ClipplyNative.addListener('windowFocus', captureOnFocus);
+  // On a cold start the window gained focus before this listener existed, so read once now.
+  captureOnFocus();
   await ClipplyNative.addListener('inbox', () => void drainInbox());
   await CapApp.addListener('resume', () => {
     void drainInbox().then(() => account.sync());
@@ -181,9 +197,11 @@ export async function boot(): Promise<Runtime> {
   await CapApp.addListener('pause', () => account.stopScheduler());
   account.startScheduler();
   library.subscribe(() => account.notifyLocalChange());
-  await drainInbox();
-  if (settings.retentionDays > 0) await library.applyRetention(settings.retentionDays * 86_400_000);
-  void account.sync();
+  // Importing waiting captures (decoding screenshots) and cleanup must not delay the first screen.
+  void drainInbox()
+    .then(() => (settings.retentionDays > 0 ? library.applyRetention(settings.retentionDays * 86_400_000) : 0))
+    .catch((error: unknown) => log.warn('startup import failed', { error }));
+  void accountReady.then(() => account.sync());
 
   const client: ClipplyClient = {
     list: async (f) => library.list(f),

@@ -79,9 +79,12 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
   };
 
   return (
+    <>
+    {/* The floating button and toast stay outside the spaced list: space-y gives every child but the last a bottom margin, which moved the button when the toast appeared. */}
     <div className="space-y-3 px-3 pb-24">
       <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} action={<SyncButton account={rt.account} />} />
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} />
+    </div>
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (
         <button
@@ -93,6 +96,6 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
         </button>
       )}
       {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(9rem+env(safe-area-inset-bottom))] rounded-xl bg-frame px-4 py-3 text-center text-sm text-frame-ink shadow-lg">{toast}</p>}
-    </div>
+    </>
   );
 }

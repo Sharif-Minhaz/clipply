@@ -44,6 +44,17 @@ describe('itemRepo', () => {
     expect(await items.count()).toBe(3);
   });
 
+  it('lists for the index without thumbnails or large bodies, with the same paging', async () => {
+    const items = itemRepo(db);
+    await items.put(row('small', 3, { body: new Uint8Array(10), thumb: Uint8Array.of(7) }));
+    await items.put(row('large', 2, { body: new Uint8Array(5000) }));
+    await items.put(row('blob', 1, { body: null }));
+    const page = await items.listForIndex(2, undefined, 100);
+    expect(page.map((r) => [r.id, r.body?.length ?? null, r.thumb, r.hasThumb])).toEqual([['small', 10, null, true], ['large', null, null, false]]);
+    const rest = await items.listForIndex(10, { createdAt: 2, id: 'large' }, 100);
+    expect(rest.map((r) => r.id)).toEqual(['blob']);
+  });
+
   it('drops ciphertext on delete and purges only tombstones', async () => {
     const items = itemRepo(db);
     await items.put(row('a', 1));

@@ -88,6 +88,25 @@ export function itemRepo(db: SqlDb) {
       return row ? fromRaw(row) : null;
     },
 
+    /**
+     * Like `list`, for building an in-memory index: thumbnails are left out (only `hasThumb`), and
+     * bodies larger than `maxBodyBytes` come back null. On Android every byte crosses the WebView
+     * bridge as JSON, so loading image bodies here made startup take seconds.
+     */
+    async listForIndex(limit: number, after: ListCursor | undefined, maxBodyBytes: number): Promise<Array<ItemRow & { hasThumb: boolean }>> {
+      const cols = COLUMNS.replace('body, thumb', 'CASE WHEN length(body) <= ? THEN body END AS body, NULL AS thumb, thumb IS NOT NULL AS has_thumb');
+      const rows = after
+        ? await db.query<RawRow & { has_thumb: number }>(
+            `SELECT ${cols} FROM items WHERE deleted = 0 AND (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?`,
+            [maxBodyBytes, after.createdAt, after.id, limit],
+          )
+        : await db.query<RawRow & { has_thumb: number }>(
+            `SELECT ${cols} FROM items WHERE deleted = 0 ORDER BY created_at DESC, id DESC LIMIT ?`,
+            [maxBodyBytes, limit],
+          );
+      return rows.map((r) => ({ ...fromRaw(r), hasThumb: r.has_thumb === 1 }));
+    },
+
     /** Newest first, keyset-paginated so pages stay stable while new items arrive. */
     async list(limit: number, after?: ListCursor): Promise<ItemRow[]> {
       const rows = after

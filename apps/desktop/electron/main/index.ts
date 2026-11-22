@@ -6,6 +6,7 @@ import { initCrypto } from '@clipply/crypto';
 import { itemRepo, migrate } from '@clipply/database';
 import { openNodeSqlite } from '@clipply/database/node';
 import { createLogger } from '@clipply/logger';
+import { MAX_THUMB_BYTES } from '@clipply/shared-schemas';
 import { AccountController, ClipLibrary, uuidv7 } from '@clipply/sync-engine';
 
 import { CH, type DesktopStatus } from '../shared/api';
@@ -92,7 +93,13 @@ async function main(): Promise<void> {
     const img = nativeImage.createFromBuffer(Buffer.from(png));
     if (img.isEmpty()) return null;
     const { width } = img.getSize();
-    return { pixels: new Uint8Array(img.toBitmap()), thumb: new Uint8Array(img.resize({ width: Math.min(320, width), quality: 'good' }).toJPEG(80)) };
+    // Busy screenshots compress poorly: step quality, then size, down until the thumbnail fits.
+    let thumb = new Uint8Array(0);
+    for (const [w, q] of [[320, 80], [320, 60], [240, 60], [180, 50], [120, 50]] as const) {
+      thumb = new Uint8Array(img.resize({ width: Math.min(w, width), quality: 'good' }).toJPEG(q));
+      if (thumb.length <= MAX_THUMB_BYTES) break;
+    }
+    return { pixels: new Uint8Array(img.toBitmap()), thumb };
   };
 
   const provider: ClipboardProvider = useClipboardHelper

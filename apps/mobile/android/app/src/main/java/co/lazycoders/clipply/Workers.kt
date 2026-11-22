@@ -148,7 +148,7 @@ class ScreenshotWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
                     if (c.getLong(3) > Inbox.MAX_BYTES) continue
                     val item = ContentUris.withAppendedId(uri, c.getLong(0))
                     val bytes = ctx.contentResolver.openInputStream(item)?.use { it.readBytes() } ?: continue
-                    if (Inbox.add(ctx, "image", c.getString(2) ?: "image/png", bytes, "screenshot")) count++
+                    if (Inbox.add(ctx, "image", c.getString(2) ?: "image/png", bytes, "screenshot", createdAt = added * 1000)) count++
                 }
             }
         } catch (e: SecurityException) {
@@ -170,6 +170,16 @@ class ScreenshotWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker
             // Starting now: existing screenshots are never imported.
             prefs.edit().putBoolean("enabled", enabled).putLong("since", System.currentTimeMillis() / 1000).apply()
             if (enabled) arm(ctx, ExistingWorkPolicy.REPLACE) else WorkManager.getInstance(ctx).cancelUniqueWork(NAME)
+        }
+
+        /**
+         * Runs the import once now. Some vendors (ColorOS, MIUI) force-stop an app swiped from recents,
+         * which cancels its content-trigger job; screenshots taken meanwhile are picked up here when
+         * Clipply is opened again (the query takes everything newer than the last import).
+         */
+        fun catchUp(ctx: Context) {
+            if (!ctx.getSharedPreferences("clipply.screenshots", Context.MODE_PRIVATE).getBoolean("enabled", false)) return
+            WorkManager.getInstance(ctx).enqueueUniqueWork("$NAME-catch-up", ExistingWorkPolicy.KEEP, OneTimeWorkRequestBuilder<ScreenshotWorker>().build())
         }
 
         private fun arm(ctx: Context, policy: ExistingWorkPolicy) {

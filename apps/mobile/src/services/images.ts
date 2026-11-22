@@ -1,3 +1,5 @@
+import { MAX_THUMB_BYTES } from '@clipply/shared-schemas';
+
 /**
  * Thumbnail + decoded pixels for an image, computed in the WebView (no extra native code).
  * Pixels are RGBA from canvas; they dedupe images within Android (desktop hashes BGRA, so the same
@@ -10,10 +12,15 @@ export async function decodeImage(bytes: Uint8Array, mime: string): Promise<{ th
     const fctx = full.getContext('2d')!;
     fctx.drawImage(bitmap, 0, 0);
     const pixels = new Uint8Array(fctx.getImageData(0, 0, bitmap.width, bitmap.height).data.buffer);
-    const scale = Math.min(1, 320 / bitmap.width);
-    const t = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
-    t.getContext('2d')!.drawImage(bitmap, 0, 0, t.width, t.height);
-    const thumb = new Uint8Array(await (await t.convertToBlob({ type: 'image/jpeg', quality: 0.8 })).arrayBuffer());
+    // Busy, tall screenshots compress poorly: step quality, then size, down until the thumbnail fits.
+    let thumb = new Uint8Array(0);
+    for (const [width, quality] of [[320, 0.8], [320, 0.6], [240, 0.6], [180, 0.5], [120, 0.5]] as const) {
+      const scale = Math.min(1, width / bitmap.width);
+      const t = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
+      t.getContext('2d')!.drawImage(bitmap, 0, 0, t.width, t.height);
+      thumb = new Uint8Array(await (await t.convertToBlob({ type: 'image/jpeg', quality })).arrayBuffer());
+      if (thumb.length <= MAX_THUMB_BYTES) break;
+    }
     bitmap.close();
     return { thumb, pixels };
   } catch {

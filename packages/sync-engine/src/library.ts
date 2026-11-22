@@ -139,11 +139,13 @@ export class ClipLibrary {
     this.index.clear();
     this.corrupt.clear();
     const items = itemRepo(this.deps.db);
-    let page = await items.list(500);
+    // Ciphertext of a searchable body is at most SEARCHABLE_BYTES plus padding and AEAD overhead.
+    const maxBody = SEARCHABLE_BYTES + 8192;
+    let page = await items.listForIndex(500, undefined, maxBody);
     while (page.length > 0) {
-      for (const row of page) this.indexRow(row);
+      for (const row of page) this.indexRow(row, row.hasThumb);
       const last = page.at(-1)!;
-      page = await items.list(500, { createdAt: last.createdAt, id: last.id });
+      page = await items.listForIndex(500, { createdAt: last.createdAt, id: last.id }, maxBody);
     }
     this.emit();
   }
@@ -588,14 +590,14 @@ export class ClipLibrary {
     this.emit();
   }
 
-  private indexRow(row: ItemRow): void {
+  private indexRow(row: ItemRow, hasThumb = row.thumb !== null): void {
     try {
       const { dek, meta } = this.openRow(row);
       let text: string | null = null;
       if (TEXT_KINDS.has(meta.kind) && row.body && meta.size <= SEARCHABLE_BYTES) {
         text = fromUtf8(openPart(dek, row.id, 'body', row.body));
       }
-      this.index.set(row.id, { id: row.id, meta, hasThumb: row.thumb !== null, ...previewOf(meta, text) });
+      this.index.set(row.id, { id: row.id, meta, hasThumb, ...previewOf(meta, text) });
       this.corrupt.delete(row.id);
     } catch (error) {
       if (!(error instanceof CryptoError)) throw error;

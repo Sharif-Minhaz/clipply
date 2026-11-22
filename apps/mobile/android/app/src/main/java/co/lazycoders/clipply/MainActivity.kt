@@ -10,6 +10,11 @@ class MainActivity : BridgeActivity() {
     }
 
     /** The only moment Android lets us read the clipboard: our window just gained focus. */
+    override fun onResume() {
+        super.onResume()
+        ScreenshotWorker.catchUp(applicationContext)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) ClipplyNativePlugin.instance?.windowFocused()

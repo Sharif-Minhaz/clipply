@@ -22,7 +22,8 @@ export interface ClipplyNativePlugin {
   secureSet(o: { key: string; value: string }): Promise<void>;
   secureRemove(o: { key: string }): Promise<void>;
   /** Only works while the app window has focus (Android 10+). Sensitive clips are skipped. */
-  readClipboard(): Promise<{ type: 'none' | 'sensitive' | 'text' | 'image'; text?: string; data?: string; mime?: string }>;
+  /** `timestamp`: when the clip was set (Android 8+), 0 when unknown. */
+  readClipboard(): Promise<{ type: 'none' | 'sensitive' | 'text' | 'image'; text?: string; data?: string; mime?: string; timestamp?: number }>;
   writeClipboardText(o: { text: string }): Promise<void>;
   writeClipboardImage(o: { data: string; mime: string }): Promise<void>;
   /** Items captured while the WebView was not running (share sheet, text selection, tile, screenshots). */

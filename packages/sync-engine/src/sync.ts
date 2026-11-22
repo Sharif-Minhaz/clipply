@@ -148,7 +148,10 @@ export class SyncEngine {
         key = sig.key;
         size = item.body.length;
       }
-      wire = { ...base, blob: { key, size }, ...(item.thumb ? { thumb: toB64(item.thumb) } : {}) };
+      // A thumbnail over the wire limit (made before thumbnails were size-capped) is left out rather than
+      // failing the push forever; other devices then show a placeholder until the image is opened.
+      const thumb = item.thumb ? toB64(item.thumb) : undefined;
+      wire = { ...base, blob: { key, size }, ...(thumb && thumb.length <= INLINE_BODY_MAX ? { thumb } : {}) };
     }
     return { type: 'upsert', opId: row.opId, baseRev: item.rev, item: wire };
   }
