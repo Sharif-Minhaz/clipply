@@ -30,7 +30,7 @@ export function deviceRoutes(store: Store, now: () => number): Router {
   /**
    * Cuts a device off at once: status, sessions and (Phase 4) key envelopes. Only an authorized
    * device may revoke others; any device may revoke itself. The caller must then rotate the vault
-   * key so the revoked device cannot read future items (docs/encryption.md §6).
+   * key so the revoked device cannot read future items (docs/encryption.md §5).
    */
   r.post('/:id/revoke', async (req, res) => {
     const a = requireAuth(req);

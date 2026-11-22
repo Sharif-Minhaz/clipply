@@ -46,12 +46,13 @@ The vault keyring and device private keys are wrapped with a non-exportable AES-
 | Keys / session | `SecureStore.kt` | AES-256-GCM key in Android Keystore; files in `noBackupFilesDir`; backup and device transfer disabled |
 | Capture inbox | `Inbox.kt` | Keystore-encrypted entries; drained into history on app start/resume or immediately if the app is running |
 | Foreground read | `MainActivity.onWindowFocusChanged` → JS `windowFocus` | Skips `EXTRA_IS_SENSITIVE` clips; self-writes ignored |
-| Share / text selection | `ShareActivity` | `SEND` (text, images), `SEND_MULTIPLE` (images), `PROCESS_TEXT` |
+| Share / text selection | `ShareActivity` | `SEND` (text, any file), `SEND_MULTIPLE` (any files), `PROCESS_TEXT`; files over 10 MB are refused by size before reading |
 | Quick Settings tile | `ClipboardTileService` → `CaptureActivity` | translucent activity reads on focus |
 | Screenshots | `ScreenshotWorker` | WorkManager content-URI trigger on MediaStore Images, `Screenshots` paths only, newer than enable time; re-arms with `APPEND_OR_REPLACE` (REPLACE cancelled its own run — fixed after emulator test) |
 | Background upload | `UploadWorker` + `ItemCrypto.kt` | Unique, network-constrained, exponential backoff; text only; Tink XChaCha20-Poly1305 + BouncyCastle BLAKE2b, unit-tested against `packages/crypto/vectors/item-v1.json` |
 | Copy image to clipboard | `ClipImageProvider` | serves bytes from memory via a pipe — no plaintext image file |
 | Blob transfer | plugin `uploadBlob` / `downloadBlob` | native HTTP, ciphertext only |
+| Backup / Save file | plugin `saveDocument` / `openDocument` | Storage Access Framework pickers: the user chooses the location; no storage permission |
 
 Token sharing: the worker may rotate the refresh token; `AccountController` re-reads the stored session before refreshing so the two never replay each other's token.
 
@@ -67,6 +68,7 @@ Token sharing: the worker may rotate the refresh token; `AccountController` re-r
 - Google sign-in (Credential Manager) and sync against a real server — needs `apps/mobile/.env` (`VITE_API_URL`, `VITE_GOOGLE_WEB_CLIENT_ID`) and an Android OAuth client for your signing key.
 - The Quick Settings tile tap (`cmd statusbar click-tile` did not deliver `onClick` on the emulator); image shares from another app; `UploadWorker` against a live API.
 - A real device's Doze/App Standby over hours (Battery Historian).
+- Phase 8 additions (sharing non-image files, backup export/import and Save via the system pickers) compile and are covered by shared-code tests, but were not exercised on the emulator.
 
 ## Known limitations
 

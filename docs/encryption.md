@@ -76,11 +76,15 @@ Envelope signature: Ed25519 over `"clipply/v1/envelope/" + deviceId + "/" + epoc
 
 **Refresh.** When `/vault/state` shows a new version, a device fetches its envelope and accepts it only if (a) it is signed by a device in its current roster or by the recovery key, (b) the keyring contains every key it already holds, byte-identical. If it is no longer in the roster, it treats itself as removed.
 
-## 6. Recovery and total loss
+## 6. Backups (export / import)
+
+A backup is portable across accounts and vaults, so it is not encrypted with the vault key: `PBKDF2-HMAC-SHA256` (600 000 iterations, 16-byte random salt, WebCrypto) derives a key from a passphrase of at least 10 characters; the item list (JSON, bodies and thumbnails in base64) is sealed with XChaCha20-Poly1305. File layout: a one-line JSON header with the KDF parameters, a newline, then `nonce || ciphertext`; the header is the AAD, so weakening its parameters fails authentication (tested). libsodium's standard build has no Argon2id, which would be preferable; a weak passphrase is the main risk. Import re-encrypts every item under the current vault; identical items already present are skipped. Items whose blob cannot be downloaded at export time are skipped and counted.
+
+## 7. Recovery and total loss
 
 If every authorized device **and** the recovery key are lost, the data is unrecoverable by design. The user can reset the vault (delete server ciphertext, start a new keyring). There is no server-side master key. The recovery key can be replaced from any authorized device (§5); the server accepts a new recovery signing key only together with a rotation.
 
-## 7. Threat model
+## 8. Threat model
 
 Protected against (✓ = covered by automated tests):
 - Database / Cloudinary dump; server reading content ✓ (no plaintext in DB, logs or request bodies).

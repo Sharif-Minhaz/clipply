@@ -26,7 +26,7 @@ export function verifyEd25519(publicKeyB64: string, message: Uint8Array, signatu
 /**
  * Key distribution. The server stores sealed, signed envelopes and enforces *who may publish*,
  * but cannot read or forge them: devices verify signatures and keyring continuity themselves
- * (docs/encryption.md §5–6). Server-side checks here are defence in depth and lockout guards.
+ * (docs/encryption.md §5, §7). Server-side checks here are defence in depth and lockout guards.
  */
 export function vaultRoutes(store: Store, now: () => number): Router {
   const r = Router();

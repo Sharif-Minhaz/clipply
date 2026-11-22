@@ -13,8 +13,8 @@ Gate for every phase: `npm run gate` (typecheck + tests across the workspace).
 | 5 | Sync engine, two simulated devices | **done** |
 | 6 | Android app | **done** |
 | 7 | Multi-device management | **done** |
-| 8 | Advanced features | next |
-| 9 | Security review + release (AppImage, deb, APK on GitHub Releases) | — |
+| 8 | Advanced features | **done** |
+| 9 | Security review + release (AppImage, deb, APK on GitHub Releases) | next |
 
 ## Phase 0 — done (2026-11-22)
 
@@ -24,6 +24,18 @@ Gate for every phase: `npm run gate` (typecheck + tests across the workspace).
 - Monorepo config (npm workspaces, strict `tsconfig.base.json`).
 - `packages/shared-schemas`: item, device, envelope, sync wire schemas; 7 tests pass.
 - Docs: architecture, encryption, synchronization, desktop, android, this roadmap.
+
+## Phase 8 — done (2026-11-22)
+
+- **Bulk operations**: selection mode in the shared history list (select / select all, pin, unpin, delete).
+- **Storage management**: per-kind counts and sizes; clear one kind or all history (pinned and favorite kept). Retention was already configurable.
+- **Import / export**: passphrase-encrypted backup file ([encryption.md §6](encryption.md)); desktop via native dialogs (file mode 0600), Android via the system pickers.
+- **MIME types**: files copied in a file manager (desktop, single file ≤ ~10 MB) or shared on Android become encrypted, synced `file` items with “Save”; HTML-only clips were already kept.
+- **Excluded applications** (desktop): by window class via `xprop`; X11 and XWayland windows only (measured limit on GNOME Wayland).
+- **Screenshot detection**: watcher no longer stays idle when the Screenshots folder does not exist yet.
+- **Compositors**: XWayland polling kept as the single provider (documented in [desktop.md](desktop.md)); no native-Wayland provider, since GNOME 46 lacks the data-control protocol needed for one.
+- **Performance** (Node, 5 000 text items, encrypted SQLite): load + decrypt 86 ms, search 0.23 ms per query, list 0.2 ms, capture ~1.8 ms per item. No changes needed.
+- Not verified on the emulator: Android file share, backup and Save pickers.
 
 ## Phase 7 — done (2026-11-22)
 
