@@ -1,0 +1,28 @@
+appId: co.lazycoders.clipply
+productName: Clipply
+electronVersion: 45.4.1
+directories:
+  output: dist
+  buildResources: resources
+# Everything is bundled into out/ by electron-vite; no node_modules ship.
+files:
+  - out/**
+  - resources/icon.png
+  - package.json
+linux:
+  target: [AppImage, deb]
+  category: Utility
+  icon: resources/icon.png
+  executableName: clipply
+  syncDesktopName: true
+  # Launchers start straight on XWayland, so the one-time relaunch (electron/main/index.ts) is skipped.
+  executableArgs: [--ozone-platform=x11]
+  maintainer: Clipply <clipply@users.noreply.github.com>
+  synopsis: End-to-end encrypted clipboard history
+deb:
+  packageName: clipply
+  artifactName: clipply_${version}_${arch}.deb
+  depends: [libgtk-3-0, libnss3, libxss1, libxtst6, libnotify4, libsecret-1-0, x11-utils]
+  recommends: [libappindicator3-1]
+appImage:
+  artifactName: ${productName}-${version}-${arch}.AppImage

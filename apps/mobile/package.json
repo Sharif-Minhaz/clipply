@@ -4,13 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests",
+    "android:debug": "vite build && cap sync android && cd android && ./gradlew assembleDebug && echo \"APK: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk\"",
+    "android:install:usb": "bash scripts/install-android.sh usb",
+    "android:install:wifi": "bash scripts/install-android.sh wifi",
+    "android:live": "bash scripts/install-android.sh live usb",
+    "android:live:wifi": "bash scripts/install-android.sh live wifi",
+    "android:logs": "bash scripts/android-logs.sh",
+    "android:open": "cap open android",
+    "android:release": "vite build && cap sync android && cd android && ./gradlew assembleRelease && ls android/app/build/outputs/apk/release/*.apk",
     "android:sync": "vite build && cap sync android",
-    "android:debug": "vite build && cap sync android && cd android && ./gradlew assembleDebug",
-    "android:test": "cd android && ./gradlew testDebugUnitTest"
+    "android:test": "cd android && ./gradlew testDebugUnitTest",
+    "build": "vite build",
+    "dev": "vite",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json",
+    "icons:android": "capacitor-assets generate --android"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^8.1.1",
@@ -31,6 +39,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
     "@capacitor/cli": "^8.6.2",
     "@tailwindcss/vite": "^4.3.5",
     "@types/react": "^19.3.0",

@@ -1,6 +1,12 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
+// Release signing from android/keystore.properties (gitignored; see docs/deployment.md). Without it,
+// assembleRelease produces an unsigned APK.
+def keystoreFile = rootProject.file('keystore.properties')
+def keystore = new Properties()
+if (keystoreFile.exists()) keystoreFile.withInputStream { keystore.load(it) }
+
 android {
     namespace = "co.lazycoders.clipply"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -25,8 +31,19 @@ android {
         // Cross-language test vectors live in the TypeScript crypto package.
         unitTests.all { systemProperty 'clipply.vectors', file('../../../../packages/crypto/vectors/item-v1.json').absolutePath }
     }
+    signingConfigs {
+        if (keystoreFile.exists()) {
+            release {
+                storeFile rootProject.file(keystore['storeFile'])
+                storePassword keystore['storePassword']
+                keyAlias keystore['keyAlias']
+                keyPassword keystore['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            if (keystoreFile.exists()) signingConfig signingConfigs.release
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

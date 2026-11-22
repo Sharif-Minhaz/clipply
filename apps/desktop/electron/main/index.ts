@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { app, dialog, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,9 +47,18 @@ const needsX11Relaunch =
 
 app.setName('Clipply');
 
+/**
+ * Inside an AppImage, Electron's relaunch helper runs from the AppImage's mount, which is removed
+ * when this process exits, so the helper dies. Start a new, independent AppImage process instead.
+ */
+const relaunch = (args = process.argv.slice(1)): void => {
+  if (process.env.APPIMAGE) spawn(process.env.APPIMAGE, args, { detached: true, stdio: 'ignore' }).unref();
+  else app.relaunch({ args });
+};
+
 if (needsX11Relaunch) {
   process.env.CLIPPLY_X11_RELAUNCHED = '1';
-  app.relaunch({ args: [...process.argv.slice(1), '--ozone-platform=x11'] });
+  relaunch([...process.argv.slice(1), '--ozone-platform=x11']);
   app.exit(0);
 } else if (!app.requestSingleInstanceLock()) {
   // A second launch (`clipply --toggle` from a GNOME shortcut) is forwarded to the first instance.
@@ -216,7 +226,7 @@ async function main(): Promise<void> {
       rmSync(`${dbPath}-wal`, { force: true });
       rmSync(`${dbPath}-shm`, { force: true });
       rmSync(vaultPath, { force: true });
-      app.relaunch();
+      relaunch();
       quitting = true;
       app.exit(0);
     },

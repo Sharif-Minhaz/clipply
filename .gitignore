@@ -10,6 +10,7 @@ coverage/
 !.env.example
 *.keystore
 *.jks
+keystore.properties
 google-services.json
 .vercel/
 .DS_Store

@@ -12,7 +12,18 @@
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "gate": "npm run typecheck && npm test"
+    "gate": "npm run typecheck && npm test",
+    "desktop:dev": "npm run dev -w @clipply/desktop",
+    "desktop:dist": "npm run dist -w @clipply/desktop",
+    "server:dev": "npm run dev -w @clipply/server",
+    "server:build": "npm run build -w @clipply/server",
+    "android:debug": "npm run android:debug -w @clipply/mobile",
+    "android:release": "npm run android:release -w @clipply/mobile",
+    "android:install:usb": "npm run android:install:usb -w @clipply/mobile",
+    "android:install:wifi": "npm run android:install:wifi -w @clipply/mobile",
+    "android:live": "npm run android:live -w @clipply/mobile",
+    "android:live:wifi": "npm run android:live:wifi -w @clipply/mobile",
+    "android:logs": "npm run android:logs -w @clipply/mobile"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
