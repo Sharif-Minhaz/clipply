@@ -1,5 +1,5 @@
 import type { ClipKind } from '@clipply/shared-schemas';
-import type { AccountStatus, ClipView, DeviceInfo, LinkPreview, ListFilter, ManualInput, StorageStats } from '@clipply/sync-engine';
+import type { AccountStatus, ClipView, DeviceInfo, LinkPreview, ListFilter, ManualInput, StorageStats, UpdateState } from '@clipply/sync-engine';
 
 import type { Settings, SettingsPatch } from '../main/settings';
 
@@ -42,6 +42,10 @@ export const CH = {
   rename: 'devices:rename',
   replaceRecoveryKey: 'account:replace-recovery-key',
   setSyncPaused: 'account:set-sync-paused',
+  updateState: 'update:state',
+  updateCheck: 'update:check',
+  updateOpen: 'update:open',
+  updateChanged: 'update:changed',
 } as const;
 
 export interface DesktopStatus {
@@ -88,6 +92,13 @@ export interface DesktopApi {
   installGnomeShortcut(): Promise<void>;
   /** Deletes local history and keys; only offered when the vault cannot be opened. */
   resetVault(): Promise<void>;
+  /** Check-only update notices; see sync-engine/update.ts. */
+  updates: {
+    state(): Promise<UpdateState>;
+    check(): Promise<UpdateState>;
+    openReleasePage(): Promise<void>;
+    onChange(cb: () => void): () => void;
+  };
   account: {
     status(): Promise<AccountStatus>;
     onStatus(cb: () => void): () => void;

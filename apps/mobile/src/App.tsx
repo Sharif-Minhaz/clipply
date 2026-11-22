@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ClipboardPaste, Clipboard, Laptop, Pin, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip, SyncButton } from '@clipply/ui';
+import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -83,6 +83,7 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
     {/* The floating button and toast stay outside the spaced list: space-y gives every child but the last a bottom margin, which moved the button when the toast appeared. */}
     <div className="space-y-3 px-3 pb-24">
       <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} action={<SyncButton account={rt.account} />} />
+      {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} variant="banner" />}
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} />
     </div>
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}

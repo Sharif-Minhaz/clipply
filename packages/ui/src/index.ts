@@ -8,3 +8,4 @@ export * from './storage';
 export * from './theme';
 export * from './settings';
 export * from './add';
+export * from './updates';

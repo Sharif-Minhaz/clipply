@@ -9,7 +9,7 @@ Copy something on your laptop, find it on your phone, and the other way round: t
 | Android 7.0+ (API 24) | `Clipply-<version>.apk` | [GitHub Releases](https://github.com/Sharif-Minhaz/clipply/releases/latest) |
 | Ubuntu / Debian (x64) | `clipply_<version>_amd64.deb` or `Clipply-<version>-x86_64.AppImage` | [GitHub Releases](https://github.com/Sharif-Minhaz/clipply/releases/latest) |
 
-Current version: **0.1.1**. Clipply is not on the Play Store. The rest of this page explains what that means for your privacy, how to check that the file you downloaded is genuine, and what happens to your data at every step.
+Current version: **0.1.2**. Clipply is not on the Play Store. The rest of this page explains what that means for your privacy, how to check that the file you downloaded is genuine, and what happens to your data at every step.
 
 ## Screenshots
 
@@ -53,7 +53,7 @@ Installing an app from outside the Play Store means trusting the developer inste
 - **Encrypted on your device, decrypted only on your devices.** Content is encrypted with keys that are created on your device and are never sent to the server in readable form. The server, the database (MongoDB Atlas), the file storage (Cloudinary) and the host (Vercel) only ever receive ciphertext.
 - **Google sign-in identifies your account and nothing more.** Your Google account is not used to derive or unlock any key. If someone took over the Clipply server or your Google login, they still could not decrypt your history.
 - **New devices need your approval.** A device you add only gets your keys after you compare a 12-digit code on both screens. The server cannot add a device on its own.
-- **No analytics, no ads, no crash reporting, no third-party SDKs that phone home.** The app talks to exactly three places: your Clipply API, Google (only for sign-in), and Cloudinary (only to upload/download encrypted image and file blobs).
+- **No analytics, no ads, no crash reporting, no third-party SDKs that phone home.** The app talks to your Clipply API, Google (only for sign-in), Cloudinary (only to upload/download encrypted image and file blobs) and, at most once a day, GitHub (only to ask whether a newer version exists — [details](#in-app-update-check)). Link previews, if you leave them on, fetch the linked page's preview image.
 - **Works without an account.** Sync is optional. Without signing in, your history stays on the device, still encrypted at rest.
 - **Open source.** Everything in this README can be checked in the code; file paths are given throughout.
 - **Signed releases with checksums.** Every release ships a `SHA256SUMS` file, and the Android APK is always signed with the same key, so Android itself refuses any "update" signed by someone else ([details](#update-channel-and-verifying-downloads)).
@@ -360,7 +360,19 @@ apksigner verify --print-certs Clipply-<version>.apk
 - **Ubuntu (.deb):** `sudo apt install ./clipply_<version>_amd64.deb`.
 - **Ubuntu (AppImage):** replace the old file with the new one.
 
-The apps do not download or install updates on their own today; they never contact GitHub in the background. (Releases already publish `latest-linux.yml` so in-app update checks can be added later, and those will use GitHub Releases as their only source.)
+### In-app update check
+
+Both apps can tell you when a new version is out: **Settings → Updates** shows your version and a **Check for updates** button. When a newer release exists, the desktop sidebar shows "Update available" and the Android Clipboard tab shows a banner. Tapping it opens the release page in your browser; you download and install the update yourself, exactly as above.
+
+What it does, and what it does not do:
+
+- **One anonymous request** to GitHub's public API: `GET https://api.github.com/repos/Sharif-Minhaz/clipply/releases/latest`. No account, device id, token or anything about your clips is sent. GitHub sees your IP address, as with any website.
+- **At most once a day**, when the app opens (Android) or its window gets focus (desktop). Nothing is polled in the background. Pressing "Check for updates" always checks.
+- **Check only.** Clipply never downloads or installs anything by itself, and the Android app does not have the "install other apps" permission.
+- **The link cannot be redirected.** The app reads only the version number from GitHub's answer and builds the link to `github.com/Sharif-Minhaz/clipply/releases/tag/v<version>` itself; drafts and pre-releases are ignored.
+- **You can turn it off:** Settings → Updates → "Check for updates automatically". The manual button keeps working.
+
+Implementation: [packages/sync-engine/src/update.ts](packages/sync-engine/src/update.ts).
 
 ---
 
@@ -400,7 +412,7 @@ Being honest about these is part of being trustworthy:
 - Android keeps keys in WebView memory while the app is open; new items from other devices appear when you open the app (no push notifications, by design).
 - Android background capture uploads **text** immediately; images captured while the app is closed upload the next time you open it.
 - Linux on GNOME Wayland: copies from native Wayland apps cannot be attributed to an app, so the "excluded apps" setting only works for X11/XWayland windows.
-- There is no in-app update check yet.
+- Updates are not installed automatically: the app tells you, you download the new version from GitHub Releases.
 
 The full threat model, with which protections are covered by automated tests: [docs/encryption.md §8](docs/encryption.md#8-threat-model).
 

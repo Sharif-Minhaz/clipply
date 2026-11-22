@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { MIN_PASSPHRASE_LENGTH } from '@clipply/crypto';
 import { ClipKind } from '@clipply/shared-schemas';
 import { DeviceName } from '@clipply/shared-schemas';
-import { exportBackup, importBackup, MAX_CAPTURE_BYTES, type AccountController, type ClipLibrary } from '@clipply/sync-engine';
+import { exportBackup, importBackup, MAX_CAPTURE_BYTES, type AccountController, type ClipLibrary, type UpdateChecker } from '@clipply/sync-engine';
 import type { Logger } from '@clipply/logger';
 
 import { CH, type DesktopStatus } from '../shared/api';
@@ -48,6 +48,9 @@ export interface IpcDeps {
   installShortcut: () => Promise<void>;
   resetVault: () => Promise<void>;
   account: () => AccountController | null;
+  updates: UpdateChecker;
+  /** Opens the URL of the current update state in the system browser. */
+  openReleasePage: () => Promise<void>;
   /** Native save/open dialog for backup files; null when cancelled. */
   chooseBackupFile: (mode: 'save' | 'open') => Promise<string | null>;
   log: Logger;
@@ -117,6 +120,9 @@ export function registerIpc(d: IpcDeps): void {
   handle(CH.updateSettings, z.tuple([SettingsPatch]), (patch) => core().updateSettings(patch));
   handle(CH.installShortcut, z.tuple([]), () => d.installShortcut());
   handle(CH.resetVault, z.tuple([]), () => d.resetVault());
+  handle(CH.updateState, z.tuple([]), () => d.updates.state());
+  handle(CH.updateCheck, z.tuple([]), () => d.updates.check({ force: true }));
+  handle(CH.updateOpen, z.tuple([]), () => d.openReleasePage());
 
   const acct = (): AccountController => {
     const a = d.account();

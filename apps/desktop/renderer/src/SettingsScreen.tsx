@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BackupPanel, buttonClass, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher } from '@clipply/ui';
+import { BackupPanel, buttonClass, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { DesktopStatus } from '../../electron/shared/api';
 import type { Settings } from '../../electron/main/settings';
@@ -127,6 +127,10 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
             <span className="text-sm text-muted">{status?.globalShortcut ? 'Ready' : 'Unavailable'}</span>
           )}
         </div>
+      </SettingsSection>
+
+      <SettingsSection title="Updates" description="New versions are published on GitHub Releases only. Clipply tells you when one is out; you download it yourself.">
+        <UpdatePanel client={window.clipply.updates} autoCheck={settings.checkUpdates} onAutoCheck={(v) => void update({ checkUpdates: v })} />
       </SettingsSection>
 
       <SettingsSection title="Security" description="History is encrypted on disk with XChaCha20-Poly1305. The keys live in your system keyring.">

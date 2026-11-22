@@ -34,6 +34,12 @@ const api: DesktopApi = {
   updateSettings: (patch) => ipcRenderer.invoke(CH.updateSettings, patch),
   installGnomeShortcut: () => ipcRenderer.invoke(CH.installShortcut),
   resetVault: () => ipcRenderer.invoke(CH.resetVault),
+  updates: {
+    state: () => ipcRenderer.invoke(CH.updateState),
+    check: () => ipcRenderer.invoke(CH.updateCheck),
+    openReleasePage: () => ipcRenderer.invoke(CH.updateOpen),
+    onChange: on(CH.updateChanged),
+  },
   account: {
     status: () => ipcRenderer.invoke(CH.accountStatus),
     onStatus: on(CH.accountChanged),

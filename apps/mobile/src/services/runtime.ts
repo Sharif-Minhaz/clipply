@@ -8,8 +8,8 @@ import {
 } from '@clipply/crypto';
 import { kvRepo, migrate, type SqlDb } from '@clipply/database';
 import { createLogger } from '@clipply/logger';
-import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, saveFileName, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
-import type { AccountClient, BackupActions, ClipplyClient } from '@clipply/ui';
+import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, RELEASES_API, saveFileName, UpdateChecker, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
+import type { AccountClient, BackupActions, ClipplyClient, UpdateClient } from '@clipply/ui';
 
 import { b64ToBytes, bytesToB64, ClipplyNative, type InboxEntry } from './native';
 import { decodeImage } from './images';
@@ -66,6 +66,8 @@ export const MobileSettings = z.object({
   retentionDays: z.number().int().min(0).max(3650).default(30),
   /** Fetch Open Graph images for links (the site sees this device's IP). */
   linkPreviews: z.boolean().default(true),
+  /** Ask GitHub for a newer release at most once a day, when the app opens. */
+  checkUpdates: z.boolean().default(true),
 });
 
 /** Native GET (the WebView's fetch is blocked by CORS); redirects are left to the shared code to check hop by hop. */
@@ -89,6 +91,7 @@ export type MobileSettings = z.infer<typeof MobileSettings>;
 export interface Runtime extends BackupActions {
   client: ClipplyClient;
   account: AccountClient;
+  updates: UpdateClient;
   deviceId: string;
   settings(): MobileSettings;
   updateSettings(patch: Partial<MobileSettings>): Promise<MobileSettings>;
@@ -102,6 +105,8 @@ export async function boot(): Promise<Runtime> {
   let vault = await loadVault(db);
   const kv = kvRepo(db);
   let settings = MobileSettings.parse((await kv.get('settings.mobile')) ?? {});
+  // The installed versionName (set from package.json by the release script).
+  const appVersion = await CapApp.getInfo().then((i) => i.version, () => '0.0.0');
 
   let controller: AccountController | null = null;
   const library = new ClipLibrary({ db, keyring: () => vault.keyring, deviceId: vault.deviceId, fetchBlob: (id) => controller!.engine.fetchBlob(id) });
@@ -115,7 +120,7 @@ export async function boot(): Promise<Runtime> {
     db,
     library,
     identity: { deviceId: vault.deviceId, keys: vault.keys },
-    device: { name: (await ClipplyNative.deviceName()).name.slice(0, 64) || 'Android', platform: 'android', appVersion: '0.1.0' },
+    device: { name: (await ClipplyNative.deviceName()).name.slice(0, 64) || 'Android', platform: 'android', appVersion },
     getKeyring: () => vault.keyring,
     setKeyring: async (ring) => {
       vault = { ...vault, keyring: ring };
@@ -209,9 +214,45 @@ export async function boot(): Promise<Runtime> {
   // On a cold start the window gained focus before this listener existed, so read once now.
   captureOnFocus();
   await ClipplyNative.addListener('inbox', () => void drainInbox());
+  // Check-only: one anonymous GET to GitHub (native HTTP, like link previews), at most daily, when the app opens.
+  const updateListeners = new Set<() => void>();
+  const updateChecker = new UpdateChecker({
+    currentVersion: appVersion,
+    fetchLatest: async () => {
+      const res = await CapacitorHttp.get({
+        url: RELEASES_API,
+        responseType: 'json',
+        connectTimeout: 10_000,
+        readTimeout: 10_000,
+        headers: { accept: 'application/vnd.github+json', 'user-agent': 'Clipply' },
+      });
+      if (res.status !== 200) throw new Error(`GitHub answered ${res.status}`);
+      return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+    },
+    store: { get: () => kv.get('update.check'), set: (v) => kv.set('update.check', v) },
+  });
+  const autoCheckUpdates = (): void => {
+    if (!settings.checkUpdates) return;
+    updateChecker.check().then(
+      () => updateListeners.forEach((l) => l()),
+      (error: unknown) => log.debug('update check failed', { error }),
+    );
+  };
+  const updates: UpdateClient = {
+    state: () => updateChecker.state(),
+    check: () => updateChecker.check({ force: true }),
+    openReleasePage: async () => void window.open((await updateChecker.state()).url, '_system'),
+    onChange: (cb) => {
+      updateListeners.add(cb);
+      return () => updateListeners.delete(cb);
+    },
+  };
+  autoCheckUpdates();
+
   await CapApp.addListener('resume', () => {
     void drainInbox().then(() => account.sync());
     account.startScheduler();
+    autoCheckUpdates();
   });
   // Check for other devices' clips every minute only while Clipply is on screen; nothing runs in the background.
   await CapApp.addListener('pause', () => account.stopScheduler());
@@ -300,6 +341,7 @@ export async function boot(): Promise<Runtime> {
   return {
     client,
     account: accountClient,
+    updates,
     deviceId: vault.deviceId,
     settings: () => settings,
     async updateSettings(patch) {
@@ -311,6 +353,7 @@ export async function boot(): Promise<Runtime> {
       if (patch.monitoring === false) await ClipplyNative.setScreenshotWatch({ enabled: false });
       settings = next;
       await kv.set('settings.mobile', settings);
+      if (patch.checkUpdates) autoCheckUpdates();
       if (patch.retentionDays && settings.retentionDays > 0) await library.applyRetention(settings.retentionDays * 86_400_000);
       return settings;
     },

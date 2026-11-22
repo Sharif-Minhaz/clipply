@@ -5,3 +5,4 @@ export * from './sync';
 export * from './account';
 export * from './backup';
 export * from './preview';
+export * from './update';

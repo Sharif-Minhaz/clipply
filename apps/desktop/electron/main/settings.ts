@@ -16,6 +16,8 @@ export const Settings = z.object({
   closeToTray: z.boolean().default(true),
   /** Fetch Open Graph images for links (the site sees this device's IP). */
   linkPreviews: z.boolean().default(true),
+  /** Ask GitHub for a newer release at most once a day, on start / window focus. */
+  checkUpdates: z.boolean().default(true),
 });
 export type Settings = z.infer<typeof Settings>;
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import logo from './logo.png';
 import { Clipboard, Laptop, Pause, Pin, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, ClipList, ItemViewer, SearchStrip, SyncButton } from '@clipply/ui';
+import { AddClip, ClipList, ItemViewer, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -64,7 +64,8 @@ export function App() {
             {t === 'clipboard' && status && <span className="ml-auto text-xs font-normal text-frame-muted tabular-nums">{status.items}</span>}
           </button>
         ))}
-        <div className="mt-auto">
+        <div className="mt-auto space-y-1">
+          <UpdateNotice client={window.clipply.updates} variant="sidebar" />
           {status && (
             <button
               type="button"

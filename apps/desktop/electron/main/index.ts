@@ -3,11 +3,11 @@ import { app, dialog, BrowserWindow, clipboard, ClipboardItem, globalShortcut, i
 import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { initCrypto } from '@clipply/crypto';
-import { itemRepo, migrate } from '@clipply/database';
+import { itemRepo, kvRepo, migrate } from '@clipply/database';
 import { openNodeSqlite } from '@clipply/database/node';
 import { createLogger } from '@clipply/logger';
 import { MAX_THUMB_BYTES } from '@clipply/shared-schemas';
-import { AccountController, ClipLibrary, LinkPreviewer, uuidv7 } from '@clipply/sync-engine';
+import { AccountController, ClipLibrary, LinkPreviewer, RELEASES_API, UpdateChecker, uuidv7 } from '@clipply/sync-engine';
 
 import { CH, type DesktopStatus } from '../shared/api';
 import { setAutostart } from './autostart';
@@ -221,6 +221,31 @@ async function main(): Promise<void> {
     deviceId: vaultState.status === 'ready' ? vaultState.vault.deviceId : null,
   });
 
+  // Check-only: one anonymous GET to GitHub, at most daily, on start and window focus (never polled).
+  const updateKv = kvRepo(db);
+  const updates = new UpdateChecker({
+    currentVersion: app.getVersion(),
+    fetchLatest: async () => {
+      const res = await fetch(RELEASES_API, {
+        headers: { accept: 'application/vnd.github+json', 'user-agent': 'Clipply' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+      return res.json();
+    },
+    store: { get: () => updateKv.get('update.check'), set: (v) => updateKv.set('update.check', v) },
+  });
+  const autoCheckUpdates = (): void => {
+    if (!(core?.settings.checkUpdates ?? true)) return;
+    updates.check().then(
+      (s) => {
+        if (s.available) log.info('update available', { latest: s.latest });
+        send(CH.updateChanged);
+      },
+      (error: unknown) => log.debug('update check failed', { error }),
+    );
+  };
+
   const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined;
   registerIpc({
     ipcMain,
@@ -250,6 +275,8 @@ async function main(): Promise<void> {
       app.exit(0);
     },
     account: () => account,
+    updates,
+    openReleasePage: async () => shell.openExternal((await updates.state()).url),
     log: log.child('ipc'),
   });
 
@@ -291,7 +318,9 @@ async function main(): Promise<void> {
   core?.onStatusChange(() => {
     tray.refresh();
     send(CH.statusChanged);
+    autoCheckUpdates();
   });
+  autoCheckUpdates();
 
   // X11 key grab: works on X11 sessions; on GNOME Wayland the GNOME custom shortcut is used instead.
   try {
@@ -311,7 +340,10 @@ async function main(): Promise<void> {
   app.on('before-quit', () => {
     quitting = true;
   });
-  app.on('browser-window-focus', () => void account?.sync());
+  app.on('browser-window-focus', () => {
+    void account?.sync();
+    autoCheckUpdates();
+  });
   app.on('will-quit', () => {
     if (provider instanceof HelperClipboardProvider) provider.dispose();
     account?.stopScheduler();

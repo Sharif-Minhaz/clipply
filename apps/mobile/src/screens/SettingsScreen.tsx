@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BackupPanel, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher } from '@clipply/ui';
+import { BackupPanel, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { MobileSettings, Runtime } from '../services/runtime';
 
@@ -50,6 +50,9 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
       </SettingsSection>
       <SettingsSection title="Backup" description="Save your history to an encrypted file, or bring one back in.">
         <BackupPanel actions={rt} />
+      </SettingsSection>
+      <SettingsSection title="Updates" description="New versions are published on GitHub Releases only. Clipply tells you when one is out; you download and install it yourself.">
+        <UpdatePanel client={rt.updates} autoCheck={s.checkUpdates} onAutoCheck={(v) => update({ checkUpdates: v })} />
       </SettingsSection>
       <SettingsSection title="Battery">
         <p className="text-sm text-muted">
