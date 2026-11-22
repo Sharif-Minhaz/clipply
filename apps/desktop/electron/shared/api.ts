@@ -1,5 +1,5 @@
 import type { ClipKind } from '@clipply/shared-schemas';
-import type { AccountStatus, ClipView, DeviceInfo, ListFilter, StorageStats } from '@clipply/sync-engine';
+import type { AccountStatus, ClipView, DeviceInfo, LinkPreview, ListFilter, ManualInput, StorageStats } from '@clipply/sync-engine';
 
 import type { Settings, SettingsPatch } from '../main/settings';
 
@@ -11,8 +11,10 @@ export const CH = {
   copy: 'clips:copy',
   saveFile: 'clips:save-file',
   openUrl: 'clips:open-url',
+  linkPreview: 'clips:link-preview',
   flags: 'clips:flags',
   edit: 'clips:edit',
+  add: 'clips:add',
   remove: 'clips:remove',
   clear: 'clips:clear',
   storage: 'clips:storage',
@@ -68,8 +70,10 @@ export interface DesktopApi {
   copy(id: string): Promise<void>;
   saveFile(id: string): Promise<boolean>;
   openUrl(id: string): Promise<void>;
+  linkPreview(id: string): Promise<LinkPreview | null>;
   setFlags(id: string, flags: { pinned?: boolean; favorite?: boolean; title?: string }): Promise<void>;
   editText(id: string, text: string): Promise<void>;
+  add(input: ManualInput): Promise<{ duplicate: boolean }>;
   remove(ids: readonly string[]): Promise<void>;
   clear(kinds?: readonly ClipKind[]): Promise<number>;
   storage(): Promise<StorageStats>;

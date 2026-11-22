@@ -38,6 +38,35 @@ export function useClipList(filter: ListFilter): { items: ClipView[] | null; err
   return { items, error };
 }
 
+/** A link item's Open Graph image (as a blob: URL) and title; nothing until loaded or when there is none. */
+export function useLinkPreview(id: string, enabled: boolean): { title?: string; imageUrl?: string } {
+  const client = useClipply();
+  const [preview, setPreview] = useState<{ title?: string; imageUrl?: string }>({});
+
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    let created: string | null = null;
+    client.linkPreview(id).then(
+      (p) => {
+        if (!alive || !p) return;
+        if (p.image) created = URL.createObjectURL(new Blob([p.image as Uint8Array<ArrayBuffer>], { type: p.imageMime ?? 'image/png' }));
+        setPreview({ ...(p.title ? { title: p.title } : {}), ...(created ? { imageUrl: created } : {}) });
+      },
+      () => {
+        // No preview: the card shows the plain link.
+      },
+    );
+    return () => {
+      alive = false;
+      if (created) URL.revokeObjectURL(created);
+      setPreview({});
+    };
+  }, [client, id, enabled]);
+
+  return preview;
+}
+
 /** Decrypted thumbnail as a short-lived blob: URL; revoked on unmount so plaintext does not linger. */
 export function useThumbUrl(id: string, enabled: boolean): string | null {
   const client = useClipply();

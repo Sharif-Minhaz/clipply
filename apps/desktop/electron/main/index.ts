@@ -7,7 +7,7 @@ import { itemRepo, migrate } from '@clipply/database';
 import { openNodeSqlite } from '@clipply/database/node';
 import { createLogger } from '@clipply/logger';
 import { MAX_THUMB_BYTES } from '@clipply/shared-schemas';
-import { AccountController, ClipLibrary, uuidv7 } from '@clipply/sync-engine';
+import { AccountController, ClipLibrary, LinkPreviewer, uuidv7 } from '@clipply/sync-engine';
 
 import { CH, type DesktopStatus } from '../shared/api';
 import { setAutostart } from './autostart';
@@ -25,6 +25,7 @@ import { createTray } from './tray/tray';
 import { openVault, writeVault, type VaultState } from './vault';
 import { googleSignIn } from './account/googleOAuth';
 import { downloadBlob, sessionStore, uploadBlob } from './account/transport';
+import { previewGet } from './preview';
 import { hostname } from 'node:os';
 import { createMainWindow, showWindow, toggleWindow } from './window/window';
 
@@ -122,7 +123,10 @@ async function main(): Promise<void> {
 
   const writeClipboard = async (data: ClipboardWrite): Promise<void> => {
     if ('png' in data) {
-      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([data.png as Uint8Array<ArrayBuffer>], { type: 'image/png' }) })]);
+      // Images added by hand (or JPEG screenshots) may be JPEG/WebP; the clipboard entry must be real PNG.
+      const isPng = data.png.length > 8 && data.png[0] === 0x89 && data.png[1] === 0x50 && data.png[2] === 0x4e && data.png[3] === 0x47;
+      const png = isPng ? data.png : new Uint8Array(nativeImage.createFromBuffer(Buffer.from(data.png)).toPNG());
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([png as Uint8Array<ArrayBuffer>], { type: 'image/png' }) })]);
     } else if (data.html !== undefined) {
       await clipboard.write([new ClipboardItem({ 'text/plain': data.text, 'text/html': data.html })]);
     } else {
@@ -176,6 +180,7 @@ async function main(): Promise<void> {
       log: log.child('account'),
     });
   }
+  const previewer = new LinkPreviewer(previewGet);
   const core: DesktopCore | null = library
     ? new DesktopCore({
         db,
@@ -188,6 +193,8 @@ async function main(): Promise<void> {
           return r.canceled || !r.filePath ? null : r.filePath;
         },
         applyScreenshots,
+        decodeImage,
+        linkPreview: (url) => previewer.preview(url),
         applyAutostart: (on) => setAutostart(on, launchCommand),
         activeApp: activeAppClasses,
         log: log.child('core'),

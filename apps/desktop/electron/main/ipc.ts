@@ -25,6 +25,16 @@ const Filter = z.object({
 }).strict();
 const Flags = z.object({ pinned: z.boolean(), favorite: z.boolean(), title: z.string().max(200) }).partial().strict();
 const Text = z.string().max(MAX_CAPTURE_BYTES);
+const Upload = {
+  name: z.string().min(1).max(255),
+  mime: z.string().min(1).max(255),
+  data: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= MAX_CAPTURE_BYTES, 'empty or too large'),
+};
+const ManualInput = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: Text.min(1) }).strict(),
+  z.object({ type: z.literal('image'), ...Upload }).strict(),
+  z.object({ type: z.literal('file'), ...Upload }).strict(),
+]);
 const Passphrase = z.string().min(MIN_PASSPHRASE_LENGTH).max(1024);
 const MAX_BACKUP_BYTES = 1024 ** 3;
 
@@ -82,8 +92,10 @@ export function registerIpc(d: IpcDeps): void {
   handle(CH.copy, z.tuple([Id]), (id) => core().copy(id));
   handle(CH.saveFile, z.tuple([Id]), (id) => core().saveFile(id));
   handle(CH.openUrl, z.tuple([Id]), (id) => core().openUrl(id));
+  handle(CH.linkPreview, z.tuple([Id]), (id) => core().linkPreview(id));
   handle(CH.flags, z.tuple([Id, Flags]), (id, flags) => lib().setFlags(id, flags));
   handle(CH.edit, z.tuple([Id, Text]), (id, text) => lib().editText(id, text));
+  handle(CH.add, z.tuple([ManualInput]), (input) => core().add(input));
   handle(CH.remove, z.tuple([z.array(Id).min(1).max(1000)]), (ids) => lib().remove(ids));
   handle(CH.clear, z.tuple([z.array(ClipKind).max(6).optional()]), (kinds) => lib().clear(kinds));
   handle(CH.storage, z.tuple([]), () => lib().stats());

@@ -54,6 +54,12 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
           checked={settings.screenshots}
           onChange={(v) => void update({ screenshots: v })}
         />
+        <SwitchRow
+          label="Show link previews"
+          hint="Fetches the page’s preview image. The site sees your IP address, and a one-time link (sign-in, password reset) may be used up."
+          checked={settings.linkPreviews}
+          onChange={(v) => void update({ linkPreviews: v })}
+        />
       </SettingsSection>
 
       <SettingsSection title="Excluded apps" description="Copies made in these apps are never saved. One window class per line, for example keepassxc.">

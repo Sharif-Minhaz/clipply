@@ -34,6 +34,8 @@ export type ItemMeta = z.infer<typeof ItemMeta>;
 
 /** Cloudinary free plan rejects raw uploads above 10 MB. */
 export const MAX_BLOB_BYTES = 10 * 1024 * 1024;
+/** Largest plaintext body whose padded ciphertext still fits one Cloudinary raw upload. */
+export const MAX_CONTENT_BYTES = MAX_BLOB_BYTES - 65_536 - 64;
 
 /** Encrypted body stored as a private Cloudinary raw asset instead of inline. */
 export const BlobRef = z.object({

@@ -32,6 +32,12 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
         <SwitchRow label="Save clips" hint="Off pauses every way of saving, including screenshots." checked={s.monitoring} onChange={(v) => update({ monitoring: v })} />
         <SwitchRow label="Save the clipboard when I open Clipply" checked={s.captureOnOpen} onChange={(v) => update({ captureOnOpen: v })} />
         <SwitchRow label="Import new screenshots" hint="Needs photo access. Android wakes Clipply only when a new image appears." checked={s.screenshots} onChange={(v) => update({ screenshots: v })} />
+        <SwitchRow
+          label="Show link previews"
+          hint="Fetches the page’s preview image. The site sees your IP address, and a one-time link (sign-in, password reset) may be used up."
+          checked={s.linkPreviews}
+          onChange={(v) => update({ linkPreviews: v })}
+        />
       </SettingsSection>
       <SettingsSection title="History" description="Pinned and favorite clips are always kept.">
         <label className="flex items-center justify-between gap-4">

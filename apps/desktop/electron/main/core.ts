@@ -2,9 +2,9 @@ import { writeFile } from 'node:fs/promises';
 import { fromUtf8 } from '@clipply/crypto';
 import { kvRepo, type SqlDb } from '@clipply/database';
 import type { Logger } from '@clipply/logger';
-import { ClipLibrary, ContentTooLargeError, htmlToText, type CaptureInput } from '@clipply/sync-engine';
+import { ClipLibrary, ContentTooLargeError, htmlToText, type CaptureInput, type LinkPreview, type ManualInput } from '@clipply/sync-engine';
 
-import type { ClipboardProvider } from './clipboard/provider';
+import type { ClipboardProvider, DecodedImage } from './clipboard/provider';
 import { loadSettings, saveSettings, type Settings, type SettingsPatch } from './settings';
 
 /** What the main process writes to the OS clipboard (Electron does the actual write). */
@@ -21,6 +21,10 @@ export interface CoreDeps {
   /** Starts/stops the screenshot watcher for the current settings. */
   applyScreenshots: (settings: Settings) => void;
   applyAutostart: (enabled: boolean) => void;
+  /** Open Graph preview for a URL (cached, public hosts only). */
+  linkPreview?: (url: string) => Promise<LinkPreview | null>;
+  /** Thumbnail + pixels for an image added by hand; null when it cannot be decoded. */
+  decodeImage?: (data: Uint8Array) => DecodedImage | null;
   /** Window classes of the focused app, null when unknown (see clipboard/activeApp.ts). */
   activeApp?: () => Promise<string[] | null>;
   log: Logger;
@@ -84,6 +88,25 @@ export class DesktopCore {
     }
   }
 
+  /**
+   * Adds text, an image or a file the user picked (the + button). An explicit action, so it ignores
+   * the monitoring pause and image-capture setting. An image that cannot be decoded is kept as a file.
+   */
+  async add(input: ManualInput): Promise<{ duplicate: boolean }> {
+    let capture: CaptureInput;
+    if (input.type === 'text') capture = { type: 'text', text: input.text };
+    else {
+      const decoded = input.type === 'image' ? (this.deps.decodeImage?.(input.data) ?? null) : null;
+      capture = decoded
+        ? { type: 'image', mime: input.mime, data: input.data, pixels: decoded.pixels, thumb: decoded.thumb }
+        : { type: 'file', mime: input.mime, data: input.data, name: input.name };
+    }
+    const res = await this.deps.library.capture(capture);
+    if (!res) throw new Error('nothing to add: the text is empty');
+    this.deps.log.info('added by hand', { id: res.id, kind: capture.type, duplicate: res.duplicate });
+    return { duplicate: res.duplicate };
+  }
+
   /** Copies an item back to the OS clipboard and tells the provider so it is not re-captured. */
   async copy(id: string): Promise<void> {
     const view = this.deps.library.get(id);
@@ -96,6 +119,13 @@ export class DesktopCore {
       await this.deps.writeClipboard({ text: htmlToText(html), html });
     } else await this.deps.writeClipboard({ text: fromUtf8(body) });
     await this.deps.provider.markCurrentAsSeen();
+  }
+
+  /** Preview for a link item; null when turned off in settings or the item is not a link. */
+  async linkPreview(id: string): Promise<LinkPreview | null> {
+    const view = this.deps.library.get(id);
+    if (!this.settings.linkPreviews || !this.deps.linkPreview || view?.meta.kind !== 'url') return null;
+    return this.deps.linkPreview(fromUtf8(await this.deps.library.readBody(id)).trim());
   }
 
   async openUrl(id: string): Promise<void> {

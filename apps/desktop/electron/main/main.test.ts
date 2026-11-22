@@ -281,6 +281,7 @@ describe('DesktopCore + IPC', () => {
       writeClipboard: async (w) => void writes.push(w),
       openExternal: async (u) => void opened.push(u),
       applyScreenshots: vi.fn(), applyAutostart: vi.fn(), ...(activeApp ? { activeApp } : {}),
+      decodeImage: (data) => (data[0] === 0x89 ? { pixels: data, thumb: Uint8Array.of(7) } : null),
     });
     await core.start();
     return { core, library, prov, writes, opened, emit: (i: CaptureInput) => onChange(i) };
@@ -341,6 +342,27 @@ describe('DesktopCore + IPC', () => {
     expect(library.stats()).toMatchObject({ count: 2, kept: 1 });
     expect(await library.clear()).toBe(1);
     expect(library.list().map((v) => v.preview)).toEqual(['keep me']);
+  });
+
+  it('adds text, images and files by hand, even while paused, via IPC', async () => {
+    const { core, library } = await setup();
+    await core.updateSettings({ monitoring: false, captureImages: false });
+    const handlers = new Map<string, (e: { senderFrame: { url: string } | null }, ...a: unknown[]) => unknown>();
+    registerIpc({
+      ipcMain: { handle: (c, l) => void handlers.set(c, l) }, allowedOrigin: 'file://', core: () => core, library: () => library, log,
+      status: async () => ({}) as never, installShortcut: async () => {}, resetVault: async () => {}, account: () => null, chooseBackupFile: async () => null,
+    });
+    const add = (input: unknown) => handlers.get('clips:add')!({ senderFrame: { url: 'file:///app' } }, input);
+    expect(await add({ type: 'text', text: 'typed note' })).toEqual({ duplicate: false });
+    expect(await add({ type: 'text', text: 'typed note' })).toEqual({ duplicate: true });
+    await add({ type: 'image', name: 'a.png', mime: 'image/png', data: Uint8Array.of(0x89, 1, 2) });
+    // Undecodable "image" is kept as a file so it can still be saved.
+    await add({ type: 'image', name: 'b.heic', mime: 'image/heic', data: Uint8Array.of(1, 2) });
+    await add({ type: 'file', name: 'c.pdf', mime: 'application/pdf', data: Uint8Array.of(3) });
+    const byKind = library.list().map((v) => [v.meta.kind, v.meta.file?.name ?? v.preview, v.hasThumb]);
+    expect(byKind).toEqual(expect.arrayContaining([['text', 'typed note', false], ['image', '', true], ['file', 'b.heic', false], ['file', 'c.pdf', false]]));
+    await expect(add({ type: 'file', name: 'x', mime: 'a/b', data: new Uint8Array(0) })).rejects.toThrow(/invalid arguments/);
+    await expect(add({ type: 'text', text: '   ' })).rejects.toThrow(/empty/);
   });
 
   it('IPC rejects untrusted frames and invalid arguments', async () => {

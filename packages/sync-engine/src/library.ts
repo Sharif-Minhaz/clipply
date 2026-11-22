@@ -3,7 +3,7 @@ import {
   unwrapDek, utf8, wrapDek, type Keyring,
 } from '@clipply/crypto';
 import { itemRepo, outboxRepo, Transactor, type ItemRow, type SqlDb } from '@clipply/database';
-import { MAX_BLOB_BYTES, type ClipKind, type EncryptedItem, type ItemMeta, type ServerItem } from '@clipply/shared-schemas';
+import { MAX_CONTENT_BYTES, type ClipKind, type EncryptedItem, type ItemMeta, type ServerItem } from '@clipply/shared-schemas';
 
 import { classifyText, htmlToText, normalizeText, uuidv7 } from './content';
 
@@ -19,6 +19,14 @@ export type CaptureInput =
       pixels?: Uint8Array;
     }
   | { type: 'file'; mime: string; data: Uint8Array; name: string };
+
+/**
+ * Something the user adds by hand (the + button). Each platform turns it into a CaptureInput: images
+ * get a thumbnail there, and an image the platform cannot decode is kept as a plain file.
+ */
+export type ManualInput =
+  | { type: 'text'; text: string }
+  | { type: 'image' | 'file'; name: string; mime: string; data: Uint8Array };
 
 /** Decrypted, display-ready item. Lives in memory only. */
 export interface ClipView {
@@ -74,7 +82,7 @@ export class ItemNotFoundError extends Error {
 }
 
 /** Largest plaintext whose padded ciphertext still fits one Cloudinary raw upload. */
-export const MAX_CAPTURE_BYTES = MAX_BLOB_BYTES - 65_536 - 64;
+export const MAX_CAPTURE_BYTES = MAX_CONTENT_BYTES;
 const PREVIEW_CHARS = 500;
 const SEARCHABLE_BYTES = 64 * 1024;
 const TEXT_KINDS: ReadonlySet<ClipKind> = new Set(['text', 'url', 'code', 'html']);

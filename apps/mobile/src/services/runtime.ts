@@ -1,4 +1,5 @@
 import { App as CapApp } from '@capacitor/app';
+import { CapacitorHttp } from '@capacitor/core';
 import { SocialLogin } from '@capgo/capacitor-social-login';
 import { z } from 'zod';
 import {
@@ -7,7 +8,7 @@ import {
 } from '@clipply/crypto';
 import { kvRepo, migrate, type SqlDb } from '@clipply/database';
 import { createLogger } from '@clipply/logger';
-import { AccountController, ClipLibrary, exportBackup, importBackup, uuidv7, type StoredSession } from '@clipply/sync-engine';
+import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
 import type { AccountClient, BackupActions, ClipplyClient } from '@clipply/ui';
 
 import { b64ToBytes, bytesToB64, ClipplyNative, type InboxEntry } from './native';
@@ -63,7 +64,26 @@ export const MobileSettings = z.object({
   captureOnOpen: z.boolean().default(true),
   screenshots: z.boolean().default(false),
   retentionDays: z.number().int().min(0).max(3650).default(30),
+  /** Fetch Open Graph images for links (the site sees this device's IP). */
+  linkPreviews: z.boolean().default(true),
 });
+
+/** Native GET (the WebView's fetch is blocked by CORS); redirects are left to the shared code to check hop by hop. */
+const previewGet: PreviewGet = async (url, maxBytes) => {
+  const res = await CapacitorHttp.get({
+    url,
+    responseType: 'arraybuffer',
+    disableRedirects: true,
+    connectTimeout: 8_000,
+    readTimeout: 8_000,
+    headers: { 'user-agent': 'Mozilla/5.0 (compatible; ClipplyLinkPreview/1.0)', accept: 'text/html,application/xhtml+xml,image/*;q=0.8' },
+  });
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(res.headers ?? {})) headers[k.toLowerCase()] = String(v);
+  // Binary responses arrive base64-encoded; anything else (an error page parsed as JSON) is not a preview.
+  const body = typeof res.data === 'string' && res.status >= 200 && res.status < 300 ? b64ToBytes(res.data) : new Uint8Array(0);
+  return { status: res.status, headers, body: body.subarray(0, maxBytes + 1) };
+};
 export type MobileSettings = z.infer<typeof MobileSettings>;
 
 export interface Runtime extends BackupActions {
@@ -203,11 +223,16 @@ export async function boot(): Promise<Runtime> {
     .catch((error: unknown) => log.warn('startup import failed', { error }));
   void accountReady.then(() => account.sync());
 
+  const previewer = new LinkPreviewer(previewGet);
   const client: ClipplyClient = {
     list: async (f) => library.list(f),
     subscribe: (cb) => library.subscribe(cb),
     readThumb: (id) => library.readThumb(id),
     readBody: (id) => library.readBody(id),
+    linkPreview: async (id) => {
+      if (!settings.linkPreviews || library.get(id)?.meta.kind !== 'url') return null;
+      return previewer.preview(fromUtf8(await library.readBody(id)).trim());
+    },
     openUrl: async (id) => {
       const url = new URL(fromUtf8(await library.readBody(id)).trim());
       if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('only http(s) links can be opened');
@@ -230,6 +255,21 @@ export async function boot(): Promise<Runtime> {
     },
     setFlags: (id, flags) => library.setFlags(id, flags),
     editText: (id, text) => library.editText(id, text),
+    // An explicit action: not subject to the monitoring pause. An image the WebView cannot decode is kept as a file.
+    add: async (input) => {
+      let res;
+      if (input.type === 'text') res = await library.capture({ type: 'text', text: input.text });
+      else {
+        const decoded = input.type === 'image' ? await decodeImage(input.data, input.mime, false) : null;
+        res = await library.capture(
+          decoded
+            ? { type: 'image', mime: input.mime, data: input.data, thumb: decoded.thumb }
+            : { type: 'file', mime: input.mime, data: input.data, name: input.name },
+        );
+      }
+      if (!res) throw new Error('nothing to add: the text is empty');
+      return { duplicate: res.duplicate };
+    },
     remove: (ids) => library.remove(ids),
     storage: async () => library.stats(),
     clear: (kinds) => library.clear(kinds),

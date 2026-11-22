@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ClipboardPaste, Clipboard, Laptop, Pin, Settings as SettingsIcon, Star } from 'lucide-react';
-import { ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip, SyncButton } from '@clipply/ui';
+import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip, SyncButton } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -87,13 +87,16 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
     </div>
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (
-        <button
-          type="button"
-          onClick={saveClipboard}
-          className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] flex items-center gap-2 rounded-2xl bg-frame px-5 py-3.5 text-base font-semibold text-frame-ink shadow-lg"
-        >
-          <ClipboardPaste aria-hidden className="size-5 text-clip" /> Save clipboard
-        </button>
+        <div className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-20 flex items-end gap-3">
+          <AddClip className="" />
+          <button
+            type="button"
+            onClick={saveClipboard}
+            className="flex h-14 items-center gap-2 rounded-2xl bg-frame px-5 text-base font-semibold text-frame-ink shadow-lg"
+          >
+            <ClipboardPaste aria-hidden className="size-5 text-clip" /> Save clipboard
+          </button>
+        </div>
       )}
       {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(9rem+env(safe-area-inset-bottom))] rounded-xl bg-frame px-4 py-3 text-center text-sm text-frame-ink shadow-lg">{toast}</p>}
     </>

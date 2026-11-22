@@ -7,3 +7,4 @@ export * from './account';
 export * from './storage';
 export * from './theme';
 export * from './settings';
+export * from './add';

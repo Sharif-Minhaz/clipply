@@ -4,7 +4,7 @@ import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
-import { useClipList, useThumbUrl } from './hooks';
+import { useClipList, useLinkPreview, useThumbUrl } from './hooks';
 import { formatRelative } from './time';
 
 export const KIND_LABEL: Record<ClipKind, string> = {
@@ -93,6 +93,7 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
   const { meta } = item;
   const KindIcon = KIND_ICON[meta.kind];
   const thumb = useThumbUrl(item.id, item.hasThumb);
+  const link = useLinkPreview(item.id, meta.kind === 'url');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const isFile = meta.kind === 'file';
@@ -151,8 +152,18 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
           ) : (
             <div className="flex h-24 items-center justify-center rounded-lg bg-surface text-sm text-muted">Image</div>
           )
+        ) : meta.kind === 'url' ? (
+          <div className="space-y-2">
+            <p className="line-clamp-2 break-words text-[1.0625rem] leading-relaxed text-accent underline decoration-accent/40 underline-offset-2">{item.preview}</p>
+            {(link.imageUrl || link.title) && (
+              <div className="overflow-hidden rounded-lg border border-line bg-surface">
+                {link.imageUrl && <img src={link.imageUrl} alt="" loading="lazy" className="max-h-56 w-full object-cover" />}
+                {link.title && <p className="line-clamp-2 px-3 py-2 text-sm font-semibold text-ink">{link.title}</p>}
+              </div>
+            )}
+          </div>
         ) : (
-          <p className={`line-clamp-4 break-words whitespace-pre-wrap text-ink ${meta.kind === 'code' ? 'font-mono text-[0.84rem] leading-relaxed' : 'text-[1.0625rem] leading-relaxed'} ${meta.kind === 'url' ? 'text-accent underline decoration-accent/40 underline-offset-2' : ''}`}>
+          <p className={`line-clamp-4 break-words whitespace-pre-wrap text-ink ${meta.kind === 'code' ? 'font-mono text-[0.84rem] leading-relaxed' : 'text-[1.0625rem] leading-relaxed'}`}>
             {item.preview}
           </p>
         )}

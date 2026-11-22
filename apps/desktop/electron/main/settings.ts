@@ -14,6 +14,8 @@ export const Settings = z.object({
   excludedApps: z.array(z.string().trim().toLowerCase().min(1).max(100)).max(100).default([]),
   launchAtLogin: z.boolean().default(false),
   closeToTray: z.boolean().default(true),
+  /** Fetch Open Graph images for links (the site sees this device's IP). */
+  linkPreviews: z.boolean().default(true),
 });
 export type Settings = z.infer<typeof Settings>;
 

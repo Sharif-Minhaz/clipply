@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 import type { ClipKind } from '@clipply/shared-schemas';
 
-import { ClipList, ClipplyProvider, formatBytes, formatRelative, ItemViewer, KindFilter, SearchBar, type ClipplyClient } from './index';
+import { AddClip, ClipList, ClipplyProvider, formatBytes, formatRelative, ItemViewer, KindFilter, SearchBar, type ClipplyClient } from './index';
 
 const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
 
@@ -53,6 +53,8 @@ class FakeLibrary {
         emit();
       },
       saveFile: async () => true,
+      add: async () => ({ duplicate: false }),
+      linkPreview: async () => null,
       storage: async () => ({ count: this.items.length, bytes: 0, kept: 0, byKind: {} }),
       clear: async () => 0,
     };
@@ -167,6 +169,31 @@ describe('shared UI', () => {
     await waitFor(() => expect(lib.list().find((i) => i.id === 'a')?.preview).toBe('milk and eggs'));
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('adds text from the + menu, and rejects oversize files before reading them', async () => {
+    const user = userEvent.setup();
+    const add = vi.fn(async () => ({ duplicate: false }));
+    const { container } = render(<ClipplyProvider client={{ ...lib.client(), add }}><AddClip /></ClipplyProvider>);
+    await user.click(screen.getByRole('button', { name: 'Add text, image or file' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Text' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add text' });
+    expect(within(dialog).getByRole('button', { name: 'Add' }).hasAttribute('disabled')).toBe(true);
+    await user.type(within(dialog).getByLabelText('Text to add'), 'call the plumber');
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    expect(add).toHaveBeenCalledWith({ type: 'text', text: 'call the plumber' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect((await screen.findByRole('status')).textContent).toBe('Added.');
+
+    const [, fileInput] = container.querySelectorAll('input[type=file]');
+    const big = new File([new Uint8Array(11 * 1024 * 1024)], 'movie.mp4', { type: 'video/mp4' });
+    await user.upload(fileInput as HTMLInputElement, big);
+    expect((await screen.findByRole('alert')).textContent).toContain('Too large');
+    expect(add).toHaveBeenCalledTimes(1);
+
+    const small = new File([new Uint8Array([1, 2, 3])], 'notes.pdf', { type: 'application/pdf' });
+    await user.upload(fileInput as HTMLInputElement, small);
+    await waitFor(() => expect(add).toHaveBeenLastCalledWith({ type: 'file', name: 'notes.pdf', mime: 'application/pdf', data: new Uint8Array([1, 2, 3]) }));
   });
 
   it('formats byte sizes', () => {
