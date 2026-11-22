@@ -24,3 +24,10 @@ deb:
   recommends: [libappindicator3-1]
 appImage:
   artifactName: ${productName}-${version}-${arch}.AppImage
+# Writes latest-linux.yml for electron-updater. Uploading is done by scripts/release.mjs, never by
+# electron-builder itself (it runs with --publish never and without a token).
+publish:
+  provider: github
+  owner: Sharif-Minhaz
+  repo: clipply
+  releaseType: release

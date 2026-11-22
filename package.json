@@ -23,7 +23,15 @@
     "android:install:wifi": "npm run android:install:wifi -w @clipply/mobile",
     "android:live": "npm run android:live -w @clipply/mobile",
     "android:live:wifi": "npm run android:live:wifi -w @clipply/mobile",
-    "android:logs": "npm run android:logs -w @clipply/mobile"
+    "android:logs": "npm run android:logs -w @clipply/mobile",
+    "publish": "node scripts/release.mjs all",
+    "release:bump": "node scripts/release.mjs bump",
+    "release:build": "node scripts/release.mjs build",
+    "release:build:linux": "node scripts/release.mjs build linux",
+    "release:build:android": "node scripts/release.mjs build android",
+    "release:tag": "node scripts/release.mjs tag",
+    "release:push": "node scripts/release.mjs push",
+    "release:upload": "node scripts/release.mjs upload"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
