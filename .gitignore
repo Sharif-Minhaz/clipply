@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+out/
+release/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+google-services.json
+.vercel/
+.DS_Store
+.tokenade/

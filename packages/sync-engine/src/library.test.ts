@@ -1,0 +1,158 @@
+// @vitest-environment node
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createKeyring, fromUtf8, initCrypto, rotateKeyring, utf8, type Keyring } from '@clipply/crypto';
+import { itemRepo, migrate, outboxRepo, type SqlDb } from '@clipply/database';
+import { openTestDb } from '@clipply/database/testing';
+
+import { classifyText, htmlToText, uuidv7 } from './content';
+import { ClipLibrary, ContentTooLargeError, ItemNotFoundError, MAX_CAPTURE_BYTES } from './library';
+
+const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
+let db: SqlDb;
+let ring: Keyring;
+let clock: number;
+let lib: ClipLibrary;
+
+beforeAll(initCrypto);
+beforeEach(async () => {
+  db = openTestDb();
+  await migrate(db);
+  ring = createKeyring();
+  clock = 1_000;
+  lib = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, now: () => clock++ });
+});
+
+describe('content helpers', () => {
+  it('classifies urls, code and text', () => {
+    expect(classifyText('https://example.com/a?b=1')).toBe('url');
+    expect(classifyText('see https://example.com')).toBe('text');
+    expect(classifyText('const x = 1;\nif (x) {\n  run();\n}')).toBe('code');
+    expect(classifyText('Shopping list:\nmilk\neggs')).toBe('text');
+  });
+
+  it('extracts text from html without scripts', () => {
+    expect(htmlToText('<p>Hi&nbsp;<b>there</b></p><script>alert(1)</script>')).toBe('Hi there');
+  });
+
+  it('makes time-ordered v7 uuids', () => {
+    const a = uuidv7(1);
+    const b = uuidv7(2);
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(a < b).toBe(true);
+  });
+});
+
+describe('ClipLibrary', () => {
+  it('captures text encrypted at rest and queues it for sync', async () => {
+    const res = await lib.capture({ type: 'text', text: 'my secret note' });
+    expect(res).toMatchObject({ duplicate: false });
+    const row = await itemRepo(db).get(res!.id);
+    const stored = Buffer.concat([row!.meta, row!.body!, row!.dek]).toString('latin1');
+    expect(stored).not.toContain('my secret note');
+    expect(stored).not.toContain('text/plain');
+    expect(row).toMatchObject({ syncState: 'pending', keyEpoch: 1 });
+    expect(await outboxRepo(db).pendingCount()).toBe(1);
+    expect(fromUtf8(await lib.readBody(res!.id))).toBe('my secret note');
+    expect(lib.list()[0]).toMatchObject({ preview: 'my secret note', meta: { kind: 'text', originDeviceId: DEVICE } });
+  });
+
+  it('ignores empty text and rejects oversize content', async () => {
+    expect(await lib.capture({ type: 'text', text: '  \r\n ' })).toBeNull();
+    await expect(lib.capture({ type: 'file', mime: 'x/y', name: 'a', data: new Uint8Array(MAX_CAPTURE_BYTES + 1) })).rejects.toThrow(ContentTooLargeError);
+  });
+
+  it('moves duplicates to the top instead of storing them twice', async () => {
+    const a = await lib.capture({ type: 'text', text: 'same\r\n' });
+    await lib.capture({ type: 'text', text: 'other' });
+    const again = await lib.capture({ type: 'text', text: 'same  ' });
+    expect(again).toEqual({ id: a!.id, duplicate: true });
+    expect(lib.list().map((v) => v.preview)).toEqual(['same\r\n', 'other']);
+    expect(await itemRepo(db).count()).toBe(2);
+  });
+
+  it('dedupes images by pixels when provided, and keeps text and file namespaces apart', async () => {
+    const pixels = Uint8Array.of(1, 2, 3, 4);
+    const a = await lib.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(9), pixels, thumb: Uint8Array.of(5) });
+    const b = await lib.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(8), pixels });
+    expect(b!.id).toBe(a!.id);
+    expect(await lib.readThumb(a!.id)).toEqual(Uint8Array.of(5));
+    const f = await lib.capture({ type: 'file', mime: 'text/plain', name: 'n.txt', data: utf8('hello') });
+    const t = await lib.capture({ type: 'text', text: 'hello' });
+    expect(f!.id).not.toBe(t!.id);
+  });
+
+  it('edits text, re-classifies and updates search', async () => {
+    const { id } = (await lib.capture({ type: 'text', text: 'draft' }))!;
+    await lib.editText(id, 'https://clipply.dev');
+    expect(lib.get(id)?.meta).toMatchObject({ kind: 'url' });
+    expect(lib.get(id)?.meta.editedAt).toBeGreaterThan(0);
+    expect(lib.list({ query: 'CLIPPLY' }).map((v) => v.id)).toEqual([id]);
+    expect(lib.list({ query: 'draft' })).toEqual([]);
+    const img = (await lib.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(1) }))!;
+    await expect(lib.editText(img.id, 'x')).rejects.toThrow(TypeError);
+  });
+
+  it('filters by kind and flags, which never reach the database in clear inside meta', async () => {
+    const { id } = (await lib.capture({ type: 'text', text: 'pin me' }))!;
+    await lib.capture({ type: 'html', html: '<b>bold move</b>' });
+    await lib.setFlags(id, { pinned: true, favorite: undefined, title: 'Important' });
+    expect(lib.list({ pinned: true }).map((v) => v.id)).toEqual([id]);
+    expect(lib.list({ kinds: ['html'] })[0]?.preview).toBe('bold move');
+    expect(lib.list({ query: 'important' }).map((v) => v.id)).toEqual([id]);
+    const row = await itemRepo(db).get(id);
+    expect(row?.pinned).toBe(true);
+    expect(Buffer.from(row!.meta).toString('latin1')).not.toContain('Important');
+  });
+
+  it('purges never-synced deletes and tombstones synced ones', async () => {
+    const local = (await lib.capture({ type: 'text', text: 'a' }))!;
+    const synced = (await lib.capture({ type: 'text', text: 'b' }))!;
+    const row = await itemRepo(db).get(synced.id);
+    await itemRepo(db).put({ ...row!, rev: 1, seq: 7, syncState: 'synced' });
+    await lib.remove([local.id, synced.id, 'missing']);
+    expect(await itemRepo(db).get(local.id)).toBeNull();
+    expect(await itemRepo(db).get(synced.id)).toMatchObject({ deleted: true, body: null });
+    const ops = await outboxRepo(db).due(Infinity, 10);
+    expect(ops).toEqual([expect.objectContaining({ itemId: synced.id, type: 'delete' })]);
+    expect(lib.list()).toEqual([]);
+    await expect(lib.readBody(synced.id)).rejects.toThrow(ItemNotFoundError);
+  });
+
+  it('applies retention but keeps pinned and favorite items', async () => {
+    const old = (await lib.capture({ type: 'text', text: 'old' }))!;
+    const keep = (await lib.capture({ type: 'text', text: 'keep' }))!;
+    await lib.setFlags(keep.id, { favorite: true });
+    clock = 10_000;
+    await lib.capture({ type: 'text', text: 'fresh' });
+    expect(await lib.applyRetention(5_000)).toBe(1);
+    expect(lib.get(old.id)).toBeUndefined();
+    expect(lib.list().map((v) => v.preview).sort()).toEqual(['fresh', 'keep']);
+  });
+
+  it('reloads from disk, survives key rotation and isolates corrupt rows', async () => {
+    const before = (await lib.capture({ type: 'text', text: 'before rotation' }))!;
+    ring = rotateKeyring(ring);
+    const after = (await lib.capture({ type: 'text', text: 'after rotation' }))!;
+    expect((await itemRepo(db).get(after.id))?.keyEpoch).toBe(2);
+
+    const row = await itemRepo(db).get(before.id);
+    const meta = row!.meta.slice();
+    meta[meta.length - 1]! ^= 1;
+    await itemRepo(db).put({ ...row!, meta });
+
+    const fresh = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE });
+    await fresh.load();
+    expect(fresh.list().map((v) => v.preview)).toEqual(['after rotation']);
+    expect(fresh.corruptCount).toBe(1);
+  });
+
+  it('notifies subscribers and exposes the hash for self-write detection', async () => {
+    let calls = 0;
+    const off = lib.subscribe(() => calls++);
+    await lib.capture({ type: 'text', text: 'x' });
+    off();
+    await lib.capture({ type: 'text', text: 'y' });
+    expect(calls).toBe(1);
+    expect(lib.hashOf({ type: 'text', text: 'x\r\n' })).toBe(lib.list({ query: 'x' })[0]?.meta.contentHash);
+  });
+});

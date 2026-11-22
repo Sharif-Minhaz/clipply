@@ -1,0 +1,126 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import type { ClipView, ListFilter } from '@clipply/sync-engine';
+import type { ClipKind } from '@clipply/shared-schemas';
+
+import { ClipList, ClipplyProvider, formatRelative, KindFilter, SearchBar, type ClipplyClient } from './index';
+
+const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
+
+/** In-memory stand-in for the platform client; the real engine is covered by sync-engine tests. */
+class FakeLibrary {
+  private items: ClipView[] = [];
+  private listeners = new Set<() => void>();
+
+  add(id: string, preview: string, kind: ClipKind, createdAt: number): void {
+    this.items.unshift({
+      id, preview, hasThumb: false,
+      meta: { kind, mime: 'text/plain', createdAt, originDeviceId: DEVICE, size: preview.length, contentHash: '0'.repeat(64), favorite: false, pinned: false },
+    });
+  }
+
+  list(f: ListFilter = {}): ClipView[] {
+    const q = f.query?.toLowerCase();
+    return this.items.filter(
+      (i) => (!f.kinds || f.kinds.includes(i.meta.kind)) && (f.pinned === undefined || i.meta.pinned === f.pinned) && (!q || i.preview.toLowerCase().includes(q)),
+    );
+  }
+
+  client(copy = vi.fn(async () => {})): ClipplyClient {
+    const emit = (): void => this.listeners.forEach((l) => l());
+    return {
+      list: async (f) => this.list(f),
+      subscribe: (cb) => {
+        this.listeners.add(cb);
+        return () => this.listeners.delete(cb);
+      },
+      readThumb: async () => null,
+      copy,
+      setFlags: async (id, flags) => {
+        this.items = this.items.map((i) => (i.id === id ? { ...i, meta: { ...i.meta, ...flags } } : i));
+        emit();
+      },
+      editText: async () => {},
+      remove: async (ids) => {
+        this.items = this.items.filter((i) => !ids.includes(i.id));
+        emit();
+      },
+    };
+  }
+}
+
+function Screen() {
+  const [query, setQuery] = useState('');
+  const [kinds, setKinds] = useState<ClipKind[]>([]);
+  const filter: ListFilter = { ...(query ? { query } : {}), ...(kinds.length ? { kinds } : {}) };
+  return (
+    <>
+      <SearchBar value={query} onChange={setQuery} />
+      <KindFilter value={kinds} onChange={setKinds} />
+      <ClipList filter={filter} deviceNames={{ [DEVICE]: 'Laptop' }} />
+    </>
+  );
+}
+
+let lib: FakeLibrary;
+beforeEach(() => {
+  lib = new FakeLibrary();
+  lib.add('a', 'grocery list', 'text', Date.now() - 121_000);
+  lib.add('b', 'https://clipply.dev', 'url', Date.now() - 120_000);
+});
+afterEach(cleanup);
+
+describe('shared UI', () => {
+  it('renders history newest first with kind, time and source device', async () => {
+    render(<ClipplyProvider client={lib.client()}><Screen /></ClipplyProvider>);
+    const cards = await screen.findAllByRole('article');
+    expect(cards.map((c) => within(c).getByText(/grocery|clipply/).textContent)).toEqual(['https://clipply.dev', 'grocery list']);
+    expect(within(cards[0]!).getByText('Link')).toBeTruthy();
+    expect(within(cards[0]!).getByText('2 minutes ago').parentElement?.textContent).toBe('2 minutes ago · Laptop');
+  });
+
+  it('searches and filters by kind', async () => {
+    const user = userEvent.setup();
+    render(<ClipplyProvider client={lib.client()}><Screen /></ClipplyProvider>);
+    await screen.findAllByRole('article');
+    await user.type(screen.getByLabelText('Search clipboard history'), 'grocery');
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    await user.clear(screen.getByLabelText('Search clipboard history'));
+    const link = within(screen.getByRole('group', { name: 'Filter by type' })).getByRole('button', { name: 'Link' });
+    await user.click(link);
+    expect(link.getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    await user.type(screen.getByLabelText('Search clipboard history'), 'zzz');
+    expect(await screen.findByText('No matches.')).toBeTruthy();
+  });
+
+  it('pins, copies and deletes through the client and re-renders on change', async () => {
+    const user = userEvent.setup();
+    const copy = vi.fn(async () => {});
+    render(<ClipplyProvider client={lib.client(copy)}><Screen /></ClipplyProvider>);
+    const [first] = await screen.findAllByRole('article');
+    await user.click(within(first!).getByRole('button', { name: 'Pin' }));
+    await waitFor(() => expect(within(screen.getAllByRole('article')[0]!).getByRole('button', { name: 'Unpin' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(lib.list({ pinned: true })).toHaveLength(1);
+
+    await user.click(within(screen.getAllByRole('article')[0]!).getByRole('button', { name: 'Copy' }));
+    expect(copy).toHaveBeenCalledWith(lib.list()[0]!.id);
+
+    await user.click(within(screen.getAllByRole('article')[0]!).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+  });
+
+  it('shows an error state when the client fails', async () => {
+    const client = { ...lib.client(), list: async () => Promise.reject(new Error('locked')) };
+    render(<ClipplyProvider client={client}><ClipList filter={{}} /></ClipplyProvider>);
+    expect((await screen.findByRole('alert')).textContent).toContain('locked');
+  });
+
+  it('formats relative times', () => {
+    expect(formatRelative(1_000, 30_000, 'en')).toBe('just now');
+    expect(formatRelative(0, 3 * 3_600_000, 'en')).toBe('3 hours ago');
+    expect(formatRelative(0, 86_400_000, 'en')).toBe('yesterday');
+  });
+});
