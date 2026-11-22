@@ -4,7 +4,7 @@ import { createKeyring, fromUtf8, initCrypto, rotateKeyring, utf8, type Keyring 
 import { itemRepo, migrate, outboxRepo, type SqlDb } from '@clipply/database';
 import { openTestDb } from '@clipply/database/testing';
 
-import { classifyText, htmlToText, uuidv7 } from './content';
+import { classifyText, htmlToText, saveFileName, uuidv7 } from './content';
 import { ClipLibrary, ContentTooLargeError, ItemNotFoundError, MAX_CAPTURE_BYTES } from './library';
 import { exportBackup, importBackup } from './backup';
 
@@ -194,5 +194,15 @@ describe('encrypted backup', () => {
     expect(await other.readBody(img.id)).toEqual(new Uint8Array([1, 2, 3]));
     expect(await other.readThumb(img.id)).toEqual(new Uint8Array([9]));
     expect(img.meta.createdAt).toBe(lib.list({ kinds: ['image'] })[0]!.meta.createdAt);
+  });
+});
+
+describe('saveFileName', () => {
+  it('keeps file names and matches image extensions to the mime type', () => {
+    expect(saveFileName({ kind: 'file', mime: 'application/pdf', file: { name: 'a.pdf' } } as never)).toBe('a.pdf');
+    expect(saveFileName({ kind: 'image', mime: 'image/jpeg' })).toBe('image.jpg');
+    expect(saveFileName({ kind: 'image', mime: 'image/WEBP' })).toBe('image.webp');
+    expect(saveFileName({ kind: 'image', mime: 'image/x-unknown' })).toBe('image.png');
+    expect(saveFileName({ kind: 'text', mime: 'text/plain' })).toBe('clip.txt');
   });
 });

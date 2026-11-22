@@ -171,6 +171,7 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
 
       {!onSelect && <footer className="flex items-center gap-0.5 px-2 pb-2">
         <IconButton icon={isFile ? Download : Copy} label={isFile ? 'Save' : 'Copy'} disabled={busy} onClick={act(primary)} />
+        {meta.kind === 'image' && <IconButton icon={Download} label="Save" disabled={busy} onClick={act(async () => void (await client.saveFile(item.id)))} />}
         <IconButton icon={Pin} label={meta.pinned ? 'Unpin' : 'Pin'} pressed={meta.pinned} disabled={busy} onClick={act(() => client.setFlags(item.id, { pinned: !meta.pinned }))} />
         <IconButton icon={Star} label={meta.favorite ? 'Unfavorite' : 'Favorite'} pressed={meta.favorite} disabled={busy} onClick={act(() => client.setFlags(item.id, { favorite: !meta.favorite }))} />
         <IconButton icon={Trash} label="Delete" danger disabled={busy} onClick={act(() => client.remove([item.id]))} />

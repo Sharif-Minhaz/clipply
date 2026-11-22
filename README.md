@@ -11,12 +11,27 @@ Copy something on your laptop, find it on your phone, and the other way round: t
 
 Current version: **0.1.1**. Clipply is not on the Play Store. The rest of this page explains what that means for your privacy, how to check that the file you downloaded is genuine, and what happens to your data at every step.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/android-clipboard.png" alt="Clipply on Android: clipboard history with search, type filters, a text clip and an image clip" width="300">
+</p>
+<p align="center"><em>Android: searchable history of text, links, code, rich text, images and files.</em></p>
+
+<!-- Desktop screenshot: save it as docs/screenshots/desktop.png and uncomment.
+<p align="center">
+  <img src="docs/screenshots/desktop.png" alt="Clipply desktop app on Ubuntu" width="800">
+</p>
+<p align="center"><em>Ubuntu: the same history in the desktop app.</em></p>
+-->
+
 ---
 
 ## Contents
 
 - [Privacy in one minute](#privacy-in-one-minute)
 - [What the server can and cannot see](#what-the-server-can-and-cannot-see)
+- [Don't take our word for it: real server data](#dont-take-our-word-for-it-real-server-data)
 - [How the encryption works](#how-the-encryption-works)
 - [End-to-end data flow: device → Vercel → MongoDB → Cloudinary](#end-to-end-data-flow)
 - [Adding devices, the recovery key, and removing devices](#adding-devices-the-recovery-key-and-removing-devices)
@@ -63,6 +78,36 @@ If even that is not enough, you can [run your own server](#run-your-own-server):
 | Your IP address | ✅ visible | Seen by Vercel on every request. The API stores it only as part of a rate-limit counter on the sign-in endpoint, auto-deleted within ~2 minutes |
 
 The server's job is reduced to **ordering, storing and authorizing**. It never decrypts anything. This is enforced by the design, not by a policy: the server simply never holds a key that could decrypt your data.
+
+---
+
+## Don't take our word for it: real server data
+
+These are screenshots of the production MongoDB Atlas database and Cloudinary account, showing the developer's own synced history. This is what the operator sees.
+
+### MongoDB: clipboard items
+
+![MongoDB Atlas clipboard_items collection: dek, meta and body fields are long random-looking base64 strings](docs/screenshots/mongodb-clipboard-items.png)
+
+Each document is one clip. `dek`, `meta` and `body` are XChaCha20-Poly1305 ciphertext (base64url). There is no `text`, `type`, `title`, `favorite` or `pinned` field: all of that is inside `meta`, encrypted. The only readable fields are random ids, the key epoch, revision/sequence counters, a `deleted` flag and the server's own timestamp.
+
+### MongoDB: device key envelopes
+
+![MongoDB Atlas device_key_envelopes collection: sealed keyrings with signatures](docs/screenshots/mongodb-key-envelopes.png)
+
+This is how your keyring travels between devices. `sealed` is the keyring encrypted to one device's public key (X25519 sealed box), so only that device can open it; `signature` is an Ed25519 signature by the device that published it (`signerDeviceId`). `epoch: 2` shows a key rotation happened after a device was removed.
+
+### Cloudinary: images and files
+
+![Cloudinary media library: folders named by random ids, no image thumbnails](docs/screenshots/cloudinary-folders.png)
+
+Blobs are stored under `clipply/<userId>/<itemId>/`. Notice that Cloudinary shows **no thumbnails**: it has nothing it can decode.
+
+![Cloudinary asset details: Format N/A, No preview available, Delivery type Private](docs/screenshots/cloudinary-asset.png)
+
+Opening one of them (a 160 KB image clip): **"No preview available"**, **Format: N/A**, **Delivery type: Private**. To Cloudinary it is 160 KB of random bytes. Downloading it requires a signed URL that only the Clipply API issues, only to the owner, valid for 10 minutes — and even then you get the same ciphertext, useless without the keys on your devices. ("Access control: Public" in that panel is a separate Cloudinary setting for access-mode; the *private* delivery type is what blocks unsigned downloads.)
+
+You can reproduce this yourself by [running your own server](#run-your-own-server) and looking at your own database.
 
 ---
 

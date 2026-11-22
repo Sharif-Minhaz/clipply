@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { fromUtf8 } from '@clipply/crypto';
 import { kvRepo, type SqlDb } from '@clipply/database';
 import type { Logger } from '@clipply/logger';
-import { ClipLibrary, ContentTooLargeError, htmlToText, type CaptureInput, type LinkPreview, type ManualInput } from '@clipply/sync-engine';
+import { ClipLibrary, ContentTooLargeError, htmlToText, saveFileName, type CaptureInput, type LinkPreview, type ManualInput } from '@clipply/sync-engine';
 
 import type { ClipboardProvider, DecodedImage } from './clipboard/provider';
 import { loadSettings, saveSettings, type Settings, type SettingsPatch } from './settings';
@@ -140,7 +140,7 @@ export class DesktopCore {
   async saveFile(id: string): Promise<boolean> {
     const view = this.deps.library.get(id);
     if (!view || !this.deps.chooseSavePath) throw new Error('item not found');
-    const path = await this.deps.chooseSavePath(view.meta.file?.name ?? (view.meta.kind === 'image' ? 'image.png' : 'clip.txt'));
+    const path = await this.deps.chooseSavePath(saveFileName(view.meta));
     if (!path) return false;
     await writeFile(path, await this.deps.library.readBody(id), { mode: 0o600 });
     return true;

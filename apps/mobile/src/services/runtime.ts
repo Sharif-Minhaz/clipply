@@ -8,7 +8,7 @@ import {
 } from '@clipply/crypto';
 import { kvRepo, migrate, type SqlDb } from '@clipply/database';
 import { createLogger } from '@clipply/logger';
-import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
+import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, saveFileName, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
 import type { AccountClient, BackupActions, ClipplyClient } from '@clipply/ui';
 
 import { b64ToBytes, bytesToB64, ClipplyNative, type InboxEntry } from './native';
@@ -250,7 +250,8 @@ export async function boot(): Promise<Runtime> {
     },
     saveFile: async (id) => {
       const v = library.get(id);
-      const name = v?.meta.file?.name ?? (v?.meta.kind === 'image' ? 'image.png' : 'clip.txt');
+      if (!v) throw new Error('item not found');
+      const name = saveFileName(v.meta);
       return (await ClipplyNative.saveDocument({ name, data: bytesToB64(await library.readBody(id)) })).saved;
     },
     setFlags: (id, flags) => library.setFlags(id, flags),

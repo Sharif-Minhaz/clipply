@@ -1,4 +1,16 @@
-import type { ClipKind } from '@clipply/shared-schemas';
+import type { ClipKind, ItemMeta } from '@clipply/shared-schemas';
+
+const IMAGE_EXT: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif',
+  'image/bmp': 'bmp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/avif': 'avif', 'image/svg+xml': 'svg',
+};
+
+/** Suggested name when the user saves an item: the original file name, else one matching the image type. */
+export function saveFileName(meta: Pick<ItemMeta, 'kind' | 'mime' | 'file'>): string {
+  if (meta.file?.name) return meta.file.name;
+  if (meta.kind === 'image') return `image.${IMAGE_EXT[meta.mime.toLowerCase()] ?? 'png'}`;
+  return 'clip.txt';
+}
 
 /** Dedupe ignores line-ending and trailing-whitespace differences between platforms. */
 export function normalizeText(text: string): string {
