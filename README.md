@@ -46,7 +46,7 @@ Installing an app from outside the Play Store means trusting the developer inste
 
 - **Encrypted on your device, decrypted only on your devices.** Content is encrypted with keys that are created on your device and are never sent to the server in readable form. The server, the database (MongoDB Atlas), the file storage (Cloudinary) and the host (Vercel) only ever receive ciphertext.
 - **Google sign-in identifies your account and nothing more.** Your Google account is not used to derive or unlock any key. If someone took over the Clipply server or your Google login, they still could not decrypt your history.
-- **New devices need your approval.** A device you add only gets your keys after you compare a 12-digit code on both screens. The server cannot add a device on its own.
+- **New devices need your approval.** A device you add only gets your keys after you scan a QR code from one device with the other (or, between two computers, compare a 12-digit code on both screens). The server cannot add a device on its own.
 - **No analytics, no ads, no crash reporting, no third-party SDKs that phone home.** The app talks to your Clipply API, Google (only for sign-in), Cloudinary (only to upload/download encrypted image and file blobs) and, at most once a day, GitHub (to ask whether a newer version exists, and to download it when you tap Update — [details](#in-app-update-check)). Link previews, if you leave them on, fetch the linked page's preview image.
 - **Works without an account.** Sync is optional. Without signing in, your history stays on the device, still encrypted at rest.
 - **Open source.** Everything in this README can be checked in the code; file paths are given throughout.
@@ -155,10 +155,10 @@ flowchart LR
 The post office ends up with many boxes, each with a locked key taped on. **Without the house key, every one of them is useless to it.**
 
 ### 4. A new phone joins the house
-1. The phone makes its own padlock and key, and asks to join. It waits on the **waiting list** (`pending`).
-2. On a device already in the house, you open Devices. Both screens show the **same 12-digit code**, computed from both devices' padlocks. If the codes match, the phone's padlock is genuine: the post office did not secretly swap in a padlock of its own.
+1. The phone makes its own padlock and key, and asks to join. It waits on the **waiting list** (`pending`). Your other devices notice and ask you: "Phone wants to join your account".
+2. You prove the phone is really the one in your hand by **scanning a QR code**: either device can show it, the other scans it. The code carries a fingerprint of the showing device's padlock and a one-time secret that only travels through the camera, never through the post office. If the post office had secretly swapped in a padlock of its own, the fingerprint would not match. Two computers without cameras compare a **12-digit code** on both screens instead; it does the same job.
 3. The existing device **copies the house key**, puts it in a box, **snaps the phone's padlock on it**, stamps it, and hands it to the post office.
-4. The phone checks the stamp ("yes, from the device I just compared codes with") and opens the box with **its own key**.
+4. The phone checks the stamp ("yes, from the device I just paired with") and opens the box with **its own key**.
 5. Now the phone has the house key: it picks up every clip box and opens them at home.
 
 ```mermaid
@@ -169,9 +169,11 @@ sequenceDiagram
     N->>N: Make own padlock + key<br/>(the key never leaves the phone)
     N->>P: "I'd like to join" + open padlock
     P->>D: A device is waiting
-    D-->>N: Both screens show the same 12-digit code
-    Note over D,N: You check the codes match<br/>= the padlock really is the phone's
-    D->>D: Copy the house key into a box,<br/>lock it with the phone's padlock, stamp it
+    D-->>N: Laptop shows a QR code, the phone scans it
+    Note over D,N: Padlock fingerprint + one-time secret,<br/>passed by camera, not by the post office
+    N->>P: Proof made with the secret
+    P->>D: Delivers the proof
+    D->>D: Proof checks out: copy the house key into a box,<br/>lock it with the phone's padlock, stamp it
     D->>P: Sealed, stamped box
     P->>N: Delivers the box (cannot open it)
     N->>N: Check the stamp, open with own key
@@ -183,6 +185,10 @@ sequenceDiagram
 
 ### 5. Everyday syncing
 Each new clip is boxed (step 3) and handed to the post office. Every minute or so, each device asks "anything new for me?", picks up new boxes and opens them at home. The post office only ever passes along locked boxes.
+
+Pictures are big, so a device fetches the newest few in the background (up to 5 among your last 15 clips), and older ones only when you open or copy them.
+
+If a device was switched off while the guest list changed several times (say, a reinstalled phone joined and then removed its old self), the latest box may be stamped by a device it has never met. It then goes through the stamped boxes it missed, oldest first, and accepts each one only if a device it already trusts stamped it. That way it catches up on its own, with no new approval.
 
 ### 6. The spare key in a bank vault (recovery key)
 When the house is set up, you get a **recovery key**, the long code you must save.
@@ -234,7 +240,7 @@ flowchart TB
     lb -. "only the house key opens them" .-> hk
 ```
 
-**The one idea to remember:** private keys never move. The house key moves only inside boxes that a single device can open, and the 12-digit code makes sure each box goes to the right device.
+**The one idea to remember:** private keys never move. The house key moves only inside boxes that a single device can open, and scanning the QR code (or comparing the 12-digit code) makes sure each box goes to the right device.
 
 ## Encryption and decryption
 
@@ -314,7 +320,7 @@ sequenceDiagram
 
 ### How the keys get to a new device
 
-The vault key is never sent in readable form. An authorized device seals the keyring to the new device's X25519 public key and signs it with its Ed25519 key; that sealed **envelope** is the only thing the server relays. The new device opens it only if the signer is the device whose 12-digit code you confirmed ([details](#adding-devices-the-recovery-key-and-removing-devices)).
+The vault key is never sent in readable form. An authorized device seals the keyring to the new device's X25519 public key and signs it with its Ed25519 key; that sealed **envelope** is the only thing the server relays. The new device opens it only if the signer is the device it paired with: the one whose QR code it scanned or that scanned its QR code, or whose 12-digit code you confirmed ([details](#adding-devices-the-recovery-key-and-removing-devices)).
 
 ---
 
@@ -332,7 +338,7 @@ Each document is one clip. `dek`, `meta` and `body` are XChaCha20-Poly1305 ciphe
 
 ![MongoDB Atlas device_key_envelopes collection: sealed keyrings with signatures](docs/screenshots/mongodb-key-envelopes.png)
 
-How your keyring travels between devices. `sealed` is the keyring encrypted to one device's public key (X25519 sealed box), so only that device can open it; `signature` is an Ed25519 signature by the device that published it (`signerDeviceId`). `epoch: 2` shows a key rotation happened after a device was removed.
+How your keyring travels between devices. `sealed` is the keyring encrypted to one device's public key (X25519 sealed box), so only that device can open it; `signature` is an Ed25519 signature by the device that published it (`signerDeviceId`). `epoch: 2` shows a key rotation happened after a device was removed. A companion collection, `device_key_envelope_history`, keeps the earlier envelopes of each device (365 days, deleted when the device is removed), so a device that missed several device-list changes can replay them and check every signer.
 
 ### MongoDB: `users`
 
@@ -344,13 +350,13 @@ One document per account: Google account id (`googleSub`), email, the change cou
 
 ![MongoDB Atlas devices collection: device name, platform, app version, status and public keys](docs/screenshots/mongodb-devices.png)
 
-Name, platform, app version, status (`pending` / `authorized` / `revoked`), the device's **public** keys and timestamps. This is the metadata the Devices screen shows before your vault is unlocked. Private keys never appear here.
+Name, platform, app version, status (`pending` / `authorized` / `revoked`), the device's **public** keys and timestamps. This is the metadata the Devices screen shows before your vault is unlocked. Private keys never appear here. A removed device stays as a `revoked` record with `revokedAt` for 30 days, so its id cannot sign in again, and is then deleted.
 
 ### MongoDB: `encrypted_objects`
 
 ![MongoDB Atlas encrypted_objects collection: itemId, size and upload status per Cloudinary blob](docs/screenshots/mongodb-encrypted-objects.png)
 
-Which Cloudinary blob belongs to which item, its padded size and its lifecycle (`pending` → `uploaded` → `attached` → `delete_pending`). Used for ownership checks, quota and cleanup. No content, no file names.
+Which Cloudinary blob belongs to which item, its padded size and its lifecycle (`pending` → `uploaded` → `attached` → `delete_pending`). Used for ownership checks, quota and cleanup. No content, no file names. The records shown are `pending`: upload slots handed out for one image whose first attempts were never confirmed.
 
 ### MongoDB: `sessions`
 
@@ -384,12 +390,16 @@ A full dump of the database and Cloudinary gives an attacker email addresses, de
 
 When you first sign in, your device creates the vault: the keyring, your device key-pair and a **recovery key** (55 characters, shown once). Write it down or store it in a password manager. Clipply cannot show it to you again and cannot reset it for you.
 
-### Adding another device (12-digit code)
+### Adding another device
 
-1. Sign in on the new device. It is **pending**: the server refuses it any access to your items.
-2. On an already authorized device, approve it.
-3. Both devices show a 12-digit code computed from both devices' public keys. **Compare them.** If the server (or anyone in the middle) substituted a key, the codes will not match.
-4. The authorized device encrypts the keyring to the new device's public key, signs it and uploads that envelope. The new device accepts it only if it is signed by the exact key whose code you confirmed.
+1. Sign in on the new device with the same Google account. It is **pending**: the server refuses it any access to your items. Your connected devices show "*Device* wants to join your account" (a banner on every screen, plus a system notification on the desktop).
+2. Pair the two by **QR code**. Either device can show it, and an Android phone scans it:
+   - new computer, connected phone: the computer's setup screen shows a QR code; on the phone open **Devices → Scan its QR code**;
+   - new phone, connected computer: on the computer open **Devices → Show this device's QR code**; on the phone tap **Scan the other device's code instead**.
+
+   The code carries a fingerprint of the showing device's public keys and a one-time secret (valid 10 minutes). The scanner checks the keys the server reports against the fingerprint, then answers with a proof made from the secret. The secret never passes through the server, so the server cannot fake the proof or swap in its own keys.
+3. No camera (two computers)? On the connected device tap **Approve** next to the waiting one. Both show a 12-digit code computed from both devices' public keys. **Compare them**: if the server substituted a key, the codes will not match.
+4. The connected device encrypts the keyring to the new device's verified public key, signs it and uploads that envelope. The new device accepts it only if it is signed by the device it paired with.
 
 ### Lost all your devices?
 
@@ -426,6 +436,8 @@ Clipply asks for very little. From [AndroidManifest.xml](apps/mobile/android/app
 | `INTERNET` | Sync with your Clipply API, Google sign-in, encrypted blob upload/download |
 | `READ_MEDIA_IMAGES` (Android 13+) / `READ_EXTERNAL_STORAGE` (Android ≤ 12) | **Only** requested if you turn on "Import new screenshots". Only files in the `Screenshots` folder created after you enable it are imported |
 | `REQUEST_INSTALL_PACKAGES` | Only to open Android's installer for Clipply's own release APK when you tap **Update** ([details](#in-app-update-check)) |
+
+Scanning a pairing QR code needs **no camera permission**: Google's code scanner runs in Google Play services' own screen and hands Clipply only the decoded text, never camera frames.
 
 That is all. No contacts, location, microphone, camera, phone, SMS, accessibility service, notification listener, or "display over other apps".
 
@@ -521,7 +533,7 @@ chmod +x Clipply-<version>-x86_64.AppImage && ./Clipply-<version>-x86_64.AppImag
 
 The app keeps running in the tray when you close the window. On GNOME Wayland, press "Add shortcut" in Settings to register `Super+V` as a GNOME custom shortcut that shows/hides Clipply (GNOME's notification list moves to `Super+M`). Tested on Ubuntu 24.04 / GNOME 46.
 
-To add the phone as a second device: sign in on it, approve it from the computer, and compare the 12-digit code on both screens.
+To add the phone as a second device: sign in on it with the same Google account, open **Devices → Show this device's QR code** on the computer, and scan it from the phone.
 
 ---
 
@@ -531,6 +543,7 @@ To add the phone as a second device: sign in on it, approve it from the computer
 - **Metadata** listed in [the table above](#what-the-server-can-and-cannot-see) — email, device names, item counts, padded sizes, timing, IP addresses — is visible to the server and its hosting providers.
 - **The server can withhold or replay** an older version of an item. It cannot read or forge content, but it can refuse to deliver changes.
 - **A device you removed, colluding with the server,** could briefly target a device that has not synced since the removal. Devices refresh on every sync, so the window is small.
+- **A pairing QR code seen by someone else** (a photo, a shared screen) while it is shown is as sensitive as the 12-digit code: together with control of the server or your Google account, it could let them pair their own device. It expires after 10 minutes and is used up by the first pairing.
 - **Backups** (export/import) are protected by your passphrase with PBKDF2 (600 000 iterations). A weak passphrase is the weak point; use 4+ random words.
 - Android keeps keys in WebView memory while the app is open; new items from other devices appear when you open the app (no push notifications, by design).
 - Android background capture uploads **text** immediately; images captured while the app is closed upload the next time you open it.

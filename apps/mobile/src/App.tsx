@@ -47,7 +47,7 @@ function Shell({ rt }: { rt: Runtime }) {
         {tab === 'clipboard' && <History rt={rt} base={{}} empty="Nothing saved yet. Tap + then Save clipboard to save what you copied, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
         {tab === 'favorites' && <History rt={rt} base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
         {tab === 'pinned' && <History rt={rt} base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
-        {tab === 'devices' && <div className="space-y-4 px-4 py-6"><h1 className="text-2xl font-bold tracking-tight">Devices</h1><DevicesPanel account={rt.account} /></div>}
+        {tab === 'devices' && <div className="space-y-6 px-4 pt-6 pb-10"><h1 className="px-1 text-[1.75rem] leading-tight font-bold tracking-tight text-ink">Devices</h1><DevicesPanel account={rt.account} /></div>}
         {tab === 'settings' && <SettingsScreen rt={rt} />}
       </main>
       <nav aria-label="Main" className="grid grid-cols-5 bg-frame pb-[env(safe-area-inset-bottom)] text-frame-muted">

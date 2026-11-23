@@ -2,5 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "cd ../.. && ELECTRON_SKIP_BINARY_DOWNLOAD=1 MONGOMS_DISABLE_POSTINSTALL=1 npm install --include=dev --no-audit --no-fund",
-  "buildCommand": "npm run build"
+  "buildCommand": "npm run build",
+  "crons": [{ "path": "/v1/internal/gc", "schedule": "0 3 * * *" }]
 }

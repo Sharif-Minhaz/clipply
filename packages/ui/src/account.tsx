@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { CloudOff, KeyRound, Laptop, LogOut, Pause, Pencil, Play, RefreshCw, ShieldCheck, Smartphone, Trash } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { CloudOff, KeyRound, Laptop, LogOut, Pause, Pencil, Play, QrCode, RefreshCw, ScanLine, ShieldCheck, Smartphone, Trash, type LucideProps } from 'lucide-react';
+import qrcode from 'qrcode-generator';
 import type { AccountStatus, DeviceInfo } from '@clipply/sync-engine';
 
-import { buttonClass } from './settings';
+import { buttonClass, SettingsSection } from './settings';
 import { formatRelative } from './time';
 
 /** Platform bridge for account, vault and device management (desktop: IPC; Android: in-WebView). */
@@ -14,7 +15,14 @@ export interface AccountClient {
   syncNow(): Promise<void>;
   /** `approved`: the server already authorized this device; only the codes are left to compare. */
   /** `rejoin`: this device was connected but missed too many device-list changes to verify the new key itself. */
-  enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null>;
+  /** `paired`: matched by QR code; nothing to compare, the device joins on its own. */
+  enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean; paired?: boolean } | null>;
+  /** Text of a fresh pairing QR code for this device (each valid 10 minutes). */
+  pairingQr(): Promise<string>;
+  /** Polled while a connected device shows its QR: the device it just approved, if one scanned it. */
+  checkPairing(): Promise<{ name: string } | null>;
+  /** Where a camera is available (Android): scan another device's QR and pair; null when cancelled. */
+  scanPairing?: () => Promise<{ name: string } | null>;
   acceptEnrollment(): Promise<void>;
   recover(recoveryKey: string): Promise<void>;
   devices(): Promise<DeviceInfo[]>;
@@ -42,7 +50,30 @@ function useAccountStatus(account: AccountClient): AccountStatus | null {
 }
 
 function Card({ children }: { children: ReactNode }) {
-  return <section className="space-y-3 rounded-xl border border-line bg-raised px-5 py-4">{children}</section>;
+  return <section className="space-y-4 rounded-2xl border border-line bg-raised p-4 sm:p-5">{children}</section>;
+}
+
+/** A whole-row button inside a grouped list: icon tile, label, optional hint. */
+function ActionRow(props: { icon: ComponentType<LucideProps>; label: string; hint?: string; onClick: () => void; tone?: 'danger'; disabled?: boolean; pressed?: boolean }) {
+  const Icon = props.icon;
+  const danger = props.tone === 'danger';
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      disabled={props.disabled}
+      {...(props.pressed !== undefined ? { 'aria-pressed': props.pressed } : {})}
+      className="flex w-full items-center gap-3.5 text-left transition-colors hover:bg-surface/70 disabled:opacity-50"
+    >
+      <span aria-hidden className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${danger ? 'bg-danger/10 text-danger' : 'bg-surface text-accent'}`}>
+        <Icon className="size-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={`block text-sm font-semibold ${danger ? 'text-danger' : 'text-ink'}`}>{props.label}</span>
+        {props.hint && <span className="mt-0.5 block text-xs text-muted">{props.hint}</span>}
+      </span>
+    </button>
+  );
 }
 
 function Button(props: { onClick: () => void; children: ReactNode; tone?: 'primary' | 'danger' | 'plain'; disabled?: boolean }) {
@@ -91,7 +122,7 @@ function RecoveryKeyNotice({ recoveryKey, replaced, onDone }: { recoveryKey: str
 }
 
 function Enrollment({ account }: { account: AccountClient }) {
-  const [pending, setPending] = useState<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null>(null);
+  const [pending, setPending] = useState<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean; paired?: boolean } | null>(null);
   const [mode, setMode] = useState<'device' | 'recovery'>('device');
   const [key, setKey] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -124,8 +155,8 @@ function Enrollment({ account }: { account: AccountClient }) {
 
   return (
     <Card>
-      <h2 className="text-base font-bold">Connect this device to your encrypted history</h2>
-      <div role="radiogroup" aria-label="How to connect" className="grid grid-cols-2 rounded-lg border border-line bg-surface p-0.5">
+      <h2 className="text-base font-bold text-ink">Connect this device to your encrypted history</h2>
+      <div role="radiogroup" aria-label="How to connect" className="grid grid-cols-2 gap-0.5 rounded-xl border border-line bg-surface p-1">
         {([['device', 'Another device'], ['recovery', 'Recovery key']] as const).map(([m, label]) => (
           <button
             key={m}
@@ -133,14 +164,18 @@ function Enrollment({ account }: { account: AccountClient }) {
             role="radio"
             aria-checked={mode === m}
             onClick={() => setMode(m)}
-            className={`rounded-md px-3 py-2 text-sm whitespace-nowrap ${mode === m ? 'bg-raised font-semibold text-ink shadow-sm' : 'text-muted'}`}
+            className={`rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${mode === m ? 'bg-raised font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'}`}
           >
             {label}
           </button>
         ))}
       </div>
       {mode === 'device' ? (
-        pending ? (
+        pending?.paired ? (
+          <p role="status" className="flex items-center gap-2 text-sm text-muted">
+            <span aria-hidden className="size-4 animate-spin rounded-full border-2 border-accent border-t-transparent" /> Connecting to {pending.approverName}…
+          </p>
+        ) : pending ? (
           <div className="space-y-3">
             <p className="text-sm text-muted">
               {pending.rejoin
@@ -156,7 +191,16 @@ function Enrollment({ account }: { account: AccountClient }) {
             </Button>
           </div>
         ) : (
-          <p className="text-sm text-muted">Open Clipply on a device that is already connected: it will ask you to approve this one (or open Devices there and tap Approve). Waiting for it…</p>
+          <div className="space-y-3">
+            <p className="text-sm text-muted">On a connected phone, open Clipply → Devices → <span className="font-semibold">Scan QR code</span> and scan this:</p>
+            <PairingQr account={account} />
+            {account.scanPairing && (
+              <Button disabled={busy} onClick={() => void run(async () => void (await account.scanPairing!()))}>
+                <ScanLine aria-hidden className="size-4" /> Scan the other device's code instead
+              </Button>
+            )}
+            <p className="text-xs text-muted">No camera? Open Clipply on a connected device: it asks you to approve this one, and you compare a code instead. Waiting…</p>
+          </div>
         )
       ) : (
         <div className="space-y-2">
@@ -183,63 +227,82 @@ function DeviceRow(props: { device: DeviceInfo; account: AccountClient; onChange
   const [name, setName] = useState(device.name);
   const [error, setError] = useState<string | null>(null);
   const Icon = device.platform === 'android' ? Smartphone : Laptop;
+  const pending = device.status === 'pending';
   const run = (fn: () => Promise<unknown>) => (): void => {
     setError(null);
     fn().then(onChanged, (e: unknown) => setError(message(e)));
   };
+  const iconButton = 'flex size-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors';
+  const now = Date.now();
 
   return (
-    <li className="space-y-3 rounded-lg border border-line p-3.5">
-      <div className="flex items-start gap-3">
-        <Icon aria-hidden className="mt-0.5 size-5 shrink-0 text-muted" />
-        <div className="min-w-0 flex-1 space-y-0.5">
+    <div className="space-y-3">
+      <div className="flex items-center gap-3.5">
+        <span aria-hidden className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${device.isThisDevice || pending ? 'bg-clip/15 text-accent' : 'bg-surface text-muted'}`}>
+          <Icon className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
           {renaming ? (
-            <div className="flex gap-2">
-              <input aria-label="Device name" value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm" />
-              <Button onClick={() => { setRenaming(false); run(() => account.rename(device.id, name))(); }}>Save</Button>
-            </div>
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setRenaming(false);
+                run(() => account.rename(device.id, name))();
+              }}
+            >
+              <input aria-label="Device name" autoFocus value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm" />
+              <button type="submit" className={buttonClass.primary}>Save</button>
+            </form>
           ) : (
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="text-base font-semibold break-words">{device.name}</span>
-              {device.isThisDevice && <span className="shrink-0 rounded bg-clip/15 px-1.5 py-0.5 text-xs font-semibold text-accent">This device</span>}
-            </div>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-[0.9375rem] font-semibold break-words text-ink">{device.name}</span>
+              {device.isThisDevice && <span className="rounded-md bg-clip/15 px-1.5 py-0.5 text-xs font-semibold text-accent">This device</span>}
+            </p>
           )}
-          <p className={`text-sm ${device.status === 'pending' ? 'font-semibold text-accent' : device.status === 'revoked' ? 'text-danger' : 'text-muted'}`}>
-            {device.status === 'pending' ? 'Waiting for approval' : device.status === 'revoked' ? 'Removed' : 'Connected'}
-          </p>
-          <p className="text-xs text-muted">
-            Last seen {formatRelative(device.lastSeenAt, Date.now())}
-            {device.lastSyncAt !== undefined && <>, synced {formatRelative(device.lastSyncAt, Date.now())}</>}
+          <p className={`mt-0.5 text-xs ${pending ? 'font-semibold text-accent' : 'text-muted'}`}>
+            {pending
+              ? 'Waiting for approval'
+              : device.lastSyncAt !== undefined
+                ? `Synced ${formatRelative(device.lastSyncAt, now)}`
+                : `Seen ${formatRelative(device.lastSeenAt, now)}`}
           </p>
         </div>
-        {!renaming && device.status !== 'revoked' && (
-          <button type="button" aria-label={`Rename ${device.name}`} onClick={() => setRenaming(true)} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-ink">
-            <Pencil aria-hidden className="size-4" />
-          </button>
+        {!renaming && (
+          <div className="flex shrink-0 items-center">
+            <button type="button" aria-label={`Rename ${device.name}`} title="Rename" onClick={() => setRenaming(true)} className={`${iconButton} hover:bg-surface hover:text-ink`}>
+              <Pencil aria-hidden className="size-4" />
+            </button>
+            {canManage && device.status === 'authorized' && !device.isThisDevice && (
+              <button
+                type="button"
+                aria-label={`Remove ${device.name}`}
+                title="Remove"
+                onClick={() => {
+                  if (window.confirm(`Remove ${device.name}? It loses access immediately, and the encryption key is rotated so it cannot read anything copied from now on.`)) run(() => account.revoke(device.id).then((r) => r.recoveryKey && props.onRecoveryKey(r.recoveryKey)))();
+                }}
+                className={`${iconButton} hover:bg-danger/10 hover:text-danger`}
+              >
+                <Trash aria-hidden className="size-4" />
+              </button>
+            )}
+          </div>
         )}
       </div>
-      <div className="flex flex-wrap gap-2 pl-8 empty:hidden">
-        {canManage && device.status === 'pending' && !code && (
-          <Button tone="primary" onClick={() => void account.startApproval(device.id).then((r) => setCode(r.code), (e: unknown) => setError(message(e)))}>Approve</Button>
+      <div className="flex flex-wrap gap-2 pl-[3.375rem] empty:hidden">
+        {canManage && pending && !code && (
+          <Button tone="primary" onClick={() => void account.startApproval(device.id).then((r) => setCode(r.code), (e: unknown) => setError(message(e)))}>
+            <ShieldCheck aria-hidden className="size-4" /> Approve
+          </Button>
         )}
         {canManage && device.status === 'authorized' && !device.isThisDevice && device.lastSyncAt === undefined && !joinCode && (
           <Button onClick={() => void account.approvalCode(device.id).then((r) => setJoinCode(r.code), (e: unknown) => setError(message(e)))}>
             <ShieldCheck aria-hidden className="size-4" /> Show code
           </Button>
         )}
-        {canManage && device.status === 'authorized' && !device.isThisDevice && (
-          <Button
-            tone="danger"
-            onClick={() => {
-              if (window.confirm(`Remove ${device.name}? It loses access immediately, and the encryption key is rotated so it cannot read anything copied from now on.`)) run(() => account.revoke(device.id).then((r) => r.recoveryKey && props.onRecoveryKey(r.recoveryKey)))();
-            }}
-          >
-            <Trash aria-hidden className="size-4" /> Remove
-          </Button>
-        )}
       </div>
       {code && (
-        <div className="space-y-2 rounded-md bg-surface p-3">
+        <div className="space-y-3 rounded-xl bg-surface p-4">
           <p className="text-sm text-muted">Check that {device.name} shows the same code:</p>
           <Code code={code} />
           <div className="flex flex-wrap gap-2">
@@ -251,14 +314,14 @@ function DeviceRow(props: { device: DeviceInfo; account: AccountClient; onChange
         </div>
       )}
       {joinCode && (
-        <div className="space-y-2 rounded-md bg-surface p-3">
+        <div className="space-y-3 rounded-xl bg-surface p-4">
           <p className="text-sm text-muted">If {device.name} has not finished setup, check that it shows this code, then tap Codes match on {device.name}:</p>
           <Code code={joinCode} />
           <Button onClick={() => setJoinCode(null)}>Close</Button>
         </div>
       )}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-    </li>
+    </div>
   );
 }
 
@@ -300,6 +363,97 @@ function confirmSignOut(pending: number): boolean {
   return window.confirm(`Sign out? This deletes the clipboard history and keys on this device. Clips already synced stay in your account.${unsynced}`);
 }
 
+/** Dark modules on a white square, so any scanner reads it in either theme. */
+export function QrSvg({ text, label }: { text: string; label: string }) {
+  const path = useMemo(() => {
+    const qr = qrcode(0, 'M');
+    qr.addData(text);
+    qr.make();
+    const n = qr.getModuleCount();
+    let d = '';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c} ${r}h1v1h-1z`;
+    return { d, n };
+  }, [text]);
+  const size = path.n + 8; // 4-module quiet zone on each side
+  return (
+    <svg role="img" aria-label={label} viewBox={`-4 -4 ${size} ${size}`} shapeRendering="crispEdges" className="mx-auto block size-56 rounded-lg">
+      <rect x={-4} y={-4} width={size} height={size} fill="#fff" />
+      <path d={path.d} fill="#000" />
+    </svg>
+  );
+}
+
+/** This device's pairing QR, refreshed before the 10-minute secret expires. */
+function PairingQr({ account }: { account: AccountClient }) {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = (): void => void account.pairingQr().then((t) => alive && setText(t), () => {});
+    load();
+    const t = setInterval(load, 8 * 60_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [account]);
+  return text ? <QrSvg text={text} label="Pairing QR code" /> : <div aria-busy="true" className="mx-auto size-56 animate-pulse rounded-lg bg-surface" />;
+}
+
+/** On a connected device: let a new one join by scanning its QR, or by showing ours for it to scan. */
+function AddDevice({ account, onAdded }: { account: AccountClient; onAdded: () => void }) {
+  const [showing, setShowing] = useState(false);
+  const [added, setAdded] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!showing) return;
+    let alive = true;
+    // Waits for the new device to scan the code shown here; it is approved as soon as its proof checks out.
+    const t = setInterval(() => {
+      void account.checkPairing().then((r) => {
+        if (!alive || !r) return;
+        setShowing(false);
+        setAdded(r.name);
+        onAdded();
+      }, (e: unknown) => alive && setError(message(e)));
+    }, 2000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [account, showing, onAdded]);
+
+  const scan = (): void => {
+    setError(null);
+    account.scanPairing!().then((r) => {
+      if (!r) return;
+      setAdded(r.name);
+      onAdded();
+    }, (e: unknown) => setError(message(e)));
+  };
+
+  return (
+    <SettingsSection title="Add a device" description="Sign in on the new device with the same Google account first.">
+      {account.scanPairing && <ActionRow icon={ScanLine} label="Scan its QR code" hint="Point the camera at the code the new device shows" onClick={scan} />}
+      <ActionRow
+        icon={QrCode}
+        label={showing ? 'Hide this device’s QR code' : 'Show this device’s QR code'}
+        hint="For a new phone to scan"
+        pressed={showing}
+        onClick={() => { setAdded(null); setError(null); setShowing(!showing); }}
+      />
+      {showing && (
+        <div className="space-y-3 bg-surface/60 py-5!">
+          <PairingQr account={account} />
+          <p className="text-center text-xs text-muted">On the new phone, tap “Scan the other device's code instead”.</p>
+        </div>
+      )}
+      {added && <p role="status" className="flex items-center gap-2 text-sm font-semibold text-accent"><ShieldCheck aria-hidden className="size-4" /> {added} is connected.</p>}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+    </SettingsSection>
+  );
+}
+
 /** Shown on every screen of a connected device while another device waits for its approval. */
 export function JoinRequestBanner({ account, onReview }: { account: AccountClient; onReview: () => void }) {
   const status = useAccountStatus(account);
@@ -315,6 +469,42 @@ export function JoinRequestBanner({ account, onReview }: { account: AccountClien
   );
 }
 
+const DOT: Record<AccountStatus['sync']['state'], string> = {
+  idle: 'bg-accent', syncing: 'bg-clip animate-pulse', paused: 'bg-muted', offline: 'bg-muted', error: 'bg-danger', off: 'bg-muted',
+};
+
+/** Who is signed in and how sync stands; the actions that apply right now sit underneath. */
+function AccountHeader({ status, account, onError }: { status: AccountStatus; account: AccountClient; onError: (m: string) => void }) {
+  const ready = status.vault === 'ready';
+  const paused = status.sync.state === 'paused';
+  const email = status.email ?? '';
+  return (
+    <section className="rounded-2xl border border-line bg-raised p-4 sm:p-5">
+      <div className="flex items-center gap-3.5">
+        <span aria-hidden className="flex size-12 shrink-0 items-center justify-center rounded-full bg-strip text-lg font-bold text-white uppercase">{email.charAt(0) || '?'}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold text-ink" title={email}>{email}</p>
+          <p className={`mt-0.5 flex items-center gap-2 text-sm ${status.sync.state === 'error' ? 'text-danger' : 'text-muted'}`}>
+            {ready && <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT[status.sync.state]}`} />}
+            <span className="min-w-0">
+              {ready ? syncLabel(status) : status.vault === 'needs_enrollment' ? 'Not connected yet' : status.vault === 'removed' ? 'Removed from your account' : 'Setting up…'}
+              {ready && status.sync.pending > 0 && `. ${status.sync.pending} waiting to upload`}
+            </span>
+          </p>
+        </div>
+      </div>
+      {ready && (
+        <div className="mt-4 flex gap-2 *:flex-1">
+          {!paused && <Button onClick={() => void account.syncNow()}><RefreshCw aria-hidden className={`size-4 ${status.sync.state === 'syncing' ? 'animate-spin' : ''}`} /> Sync now</Button>}
+          <Button onClick={() => void account.setSyncPaused(!paused).catch((e: unknown) => onError(message(e)))}>
+            {paused ? <><Play aria-hidden className="size-4" /> Resume sync</> : <><Pause aria-hidden className="size-4" /> Pause sync</>}
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Account + devices screen shared by desktop and Android. */
 export function DevicesPanel({ account }: { account: AccountClient }) {
   const status = useAccountStatus(account);
@@ -324,7 +514,6 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
   const [busy, setBusy] = useState(false);
 
   const ready = status?.vault === 'ready';
-  const paused = status?.sync.state === 'paused';
   const loadDevices = useCallback(() => {
     if (!status?.signedIn) return;
     account.devices().then(setDevices, (e: unknown) => setError(message(e)));
@@ -333,7 +522,7 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
   const requestIds = status?.joinRequests?.map((d) => d.id).join() ?? '';
   useEffect(loadDevices, [loadDevices, status?.vault, requestIds]);
 
-  if (!status) return <div aria-busy="true" className="h-24 animate-pulse rounded-xl bg-raised" />;
+  if (!status) return <div aria-busy="true" className="h-28 animate-pulse rounded-2xl bg-raised" />;
   if (!status.configured) {
     return <Card><p className="flex items-center gap-2 text-sm text-muted"><CloudOff aria-hidden className="size-4" /> Sync is not configured in this build. History stays on this device.</p></Card>;
   }
@@ -356,69 +545,68 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
     attempt().catch((e: unknown) => setError(message(e))).finally(() => setBusy(false));
   };
 
+  const shown = devices?.filter((d) => d.status !== 'revoked') ?? [];
+  // Waiting devices first: they need something from you.
+  shown.sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending'));
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {recoveryKey && <RecoveryKeyNotice recoveryKey={recoveryKey.key} replaced={recoveryKey.replaced} onDone={() => setRecoveryKey(null)} />}
       {!status.signedIn ? (
         <Card>
-          <h2 className="text-base font-bold">Sync your clipboard across devices</h2>
-          <p className="text-sm text-muted">
-            Sign in with Google to connect your devices. Your clipboard is end-to-end encrypted: Google and the Clipply server only ever see ciphertext.
-          </p>
-          {status.sync.error && <p className="text-sm text-danger">{status.sync.error}</p>}
-          <Button tone="primary" disabled={busy} onClick={signIn}>{busy ? 'Waiting for browser…' : 'Sign in with Google'}</Button>
-        </Card>
-      ) : (
-        <Card>
-          <div className="min-w-0">
-            <p className="text-base font-semibold break-all">{status.email}</p>
-            <p className={`text-sm ${status.sync.state === 'error' ? 'text-danger' : 'text-muted'}`}>
-              {syncLabel(status)}
-              {status.sync.pending > 0 && `. ${status.sync.pending} waiting to upload`}
+          <span aria-hidden className="flex size-12 items-center justify-center rounded-2xl bg-strip text-white"><RefreshCw className="size-6" /></span>
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-bold text-ink">Sync your clipboard across devices</h2>
+            <p className="text-sm text-muted">
+              Sign in with Google to connect your devices. Your clipboard is end-to-end encrypted: Google and the Clipply server only ever see ciphertext.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {ready && !paused && <Button onClick={() => void account.syncNow()}><RefreshCw aria-hidden className="size-4" /> Sync now</Button>}
-            {ready && (
-              <Button onClick={() => void account.setSyncPaused(!paused).catch((e: unknown) => setError(message(e)))}>
-                {paused ? <><Play aria-hidden className="size-4" /> Resume sync</> : <><Pause aria-hidden className="size-4" /> Pause sync</>}
-              </Button>
-            )}
-            <Button onClick={() => confirmSignOut(status.sync.pending) && void account.signOut().catch((e: unknown) => setError(message(e)))}><LogOut aria-hidden className="size-4" /> Sign out</Button>
+          {status.sync.error && <p className="text-sm text-danger">{status.sync.error}</p>}
+          <div className="*:w-full sm:*:w-auto">
+            <Button tone="primary" disabled={busy} onClick={signIn}>{busy ? 'Waiting for browser…' : 'Sign in with Google'}</Button>
           </div>
         </Card>
+      ) : (
+        <AccountHeader status={status} account={account} onError={setError} />
       )}
       {status.signedIn && status.vault === 'needs_enrollment' && <Enrollment account={account} />}
       {status.vault === 'removed' && (
         <Card><p className="text-sm text-danger">This device was removed from your account. To reconnect it, sign out (this clears the history on this device) and sign in again, then approve it from a connected device.</p></Card>
       )}
       {status.signedIn && devices && (
-        <Card>
-          <h2 className="text-base font-bold">Devices</h2>
-          <ul className="space-y-2.5">
-            {/* Removed devices stay on the server as tombstones (blocking re-registration) until purged; not worth showing. */}
-            {devices.filter((d) => d.status !== 'revoked').map((d) => (
-              <DeviceRow key={d.id} device={d} account={account} canManage={ready} onChanged={loadDevices} onRecoveryKey={(key) => setRecoveryKey({ key, replaced: true })} />
-            ))}
-          </ul>
-          <p className="text-xs text-muted">Online status is not shown: Clipply only knows when a device last contacted the server.</p>
-        </Card>
+        <SettingsSection title={`Your devices (${shown.length})`} description="Clipply only knows when each device last reached the server, not whether it is online now.">
+          {/* Removed devices stay on the server as tombstones (blocking re-registration) until purged; not worth showing. */}
+          {shown.map((d) => (
+            <DeviceRow key={d.id} device={d} account={account} canManage={ready} onChanged={loadDevices} onRecoveryKey={(key) => setRecoveryKey({ key, replaced: true })} />
+          ))}
+        </SettingsSection>
       )}
+      {ready && <AddDevice account={account} onAdded={loadDevices} />}
       {ready && (
-        <Card>
-          <h2 className="text-base font-bold">Recovery key</h2>
-          <p className="text-sm text-muted">Lost it, or someone else may have seen it? Replace it. The old key stops working and the encryption key is rotated.</p>
-          <Button
+        <SettingsSection title="Recovery key" description="The old key stops working and the encryption key is rotated. Do this if the key is lost or someone else may have seen it.">
+          <ActionRow
+            icon={KeyRound}
+            label="Replace recovery key"
+            hint="You will save the new one right away"
             disabled={busy}
             onClick={() => {
               if (!window.confirm('Replace your recovery key? You will need to save the new one.')) return;
               setBusy(true);
               account.replaceRecoveryKey().then((r) => setRecoveryKey({ key: r.recoveryKey, replaced: true }), (e: unknown) => setError(message(e))).finally(() => setBusy(false));
             }}
-          >
-            <KeyRound aria-hidden className="size-4" /> Replace recovery key
-          </Button>
-        </Card>
+          />
+        </SettingsSection>
+      )}
+      {status.signedIn && (
+        <SettingsSection title="This device" description="Clips already synced stay in your account and on your other devices.">
+          <ActionRow
+            icon={LogOut}
+            tone="danger"
+            label="Sign out"
+            hint="Deletes the history and keys on this device"
+            onClick={() => confirmSignOut(status.sync.pending) && void account.signOut().catch((e: unknown) => setError(message(e)))}
+          />
+        </SettingsSection>
       )}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     </div>

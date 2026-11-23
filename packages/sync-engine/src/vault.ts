@@ -1,7 +1,8 @@
 import {
   CryptoError, deriveRecoveryKeys, enrollmentCode, extendsKeyring, formatRecoveryKey, fromB64, generateRecoveryKey,
-  openKeyringEnvelope, openRecoveryEnvelope, parseRecoveryKey, recoveryPublicKeys, rosterEntry, rotateKeyring,
-  sealKeyringFor, sealRecoveryEnvelope, signRecoveryProof, toB64, withRecovery, withRoster,
+  matchesFingerprint, openKeyringEnvelope, openRecoveryEnvelope, pairingFingerprint, pairingProof, pairingSecret, parseRecoveryKey,
+  recoveryPublicKeys, rosterEntry, rotateKeyring, sealKeyringFor, sealRecoveryEnvelope, signRecoveryProof, toB64,
+  verifyPairingProof, withRecovery, withRoster,
   type DeviceKeyPairs, type Keyring, type RosterEntry, type SealedEnvelope,
 } from '@clipply/crypto';
 import type { ApiClient } from '@clipply/api-client';
@@ -20,7 +21,7 @@ export interface DevicePublicKeys {
 
 export type VaultApi = Pick<
   ApiClient,
-  'vaultState' | 'initVault' | 'envelope' | 'envelopeHistory' | 'claimDevice' | 'enrollment' | 'publishEnvelopes' | 'recover' | 'revokeDevice'
+  'vaultState' | 'initVault' | 'envelope' | 'envelopeHistory' | 'claimDevice' | 'pairDevice' | 'enrollment' | 'publishEnvelopes' | 'recover' | 'revokeDevice'
 >;
 
 export class VaultProtocolError extends Error {
@@ -85,7 +86,51 @@ export function enrollmentCodeFor(newDevice: DevicePublicKeys, approver: DeviceP
   return enrollmentCode(n, a);
 }
 
-/** Approver side, after `claimDevice` and after the user confirmed matching codes. */
+// ── QR pairing (replaces the code comparison when one device can scan the other's screen) ──────
+
+/** A pairing QR this device shows: its id, its key fingerprint and a one-time secret. */
+export interface PairingOffer {
+  text: string;
+  secret: Uint8Array;
+}
+
+export interface ScannedPairing {
+  deviceId: string;
+  fingerprint: Uint8Array;
+  secret: Uint8Array;
+}
+
+const PAIRING_QR = /^clipply-pair:1:([0-9a-fA-F-]{36}):([A-Za-z0-9_-]{43}):([A-Za-z0-9_-]{22})$/;
+
+export function createPairingOffer(me: DeviceIdentity): PairingOffer {
+  const secret = pairingSecret();
+  return { secret, text: `clipply-pair:1:${me.deviceId}:${toB64(pairingFingerprint(selfEntry(me)))}:${toB64(secret)}` };
+}
+
+export function parsePairingQr(text: string): ScannedPairing {
+  const m = PAIRING_QR.exec(text.trim());
+  if (!m) throw new VaultProtocolError('This is not a Clipply pairing code.');
+  return { deviceId: m[1]!, fingerprint: fromB64(m[2]!), secret: fromB64(m[3]!) };
+}
+
+/**
+ * Scanner side: checks the keys the server reports for the QR's device against the fingerprint the
+ * QR carries (a substituted key fails here), then returns the proof to send through the server.
+ */
+export function answerPairing(qr: ScannedPairing, me: DeviceIdentity, shower: { id: string; keys: DevicePublicKeys }): string {
+  const entry = entryOf(shower.id, shower.keys);
+  if (shower.id !== qr.deviceId || !matchesFingerprint(entry, qr.fingerprint)) {
+    throw new VaultProtocolError("The device's keys do not match the code. Do not continue: someone may be intercepting the connection.");
+  }
+  return toB64(pairingProof(qr.secret, selfEntry(me), entry));
+}
+
+/** Showing side: true only if `proof` comes from a device that read our QR and has exactly these keys. */
+export function checkPairingProof(offer: PairingOffer, me: DeviceIdentity, scanner: { id: string; keys: DevicePublicKeys }, proof: string): boolean {
+  return verifyPairingProof(offer.secret, entryOf(scanner.id, scanner.keys), selfEntry(me), fromB64(proof));
+}
+
+/** Approver side, after `claimDevice` and after the user confirmed matching codes (or a verified QR pairing). */
 export async function approveDevice(api: VaultApi, me: DeviceIdentity, ring: Keyring, pending: { id: string; keys: DevicePublicKeys }): Promise<Keyring> {
   const roster = (ring.roster ?? []).filter((r) => r.id !== pending.id);
   const next = withRoster(ring, [...roster, entryOf(pending.id, pending.keys)]);

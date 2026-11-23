@@ -64,9 +64,14 @@ Envelope signature: Ed25519 over `"clipply/v1/envelope/" + deviceId + "/" + epoc
 1. New device N signs in → `pending`; it can reach no vault data. Connected devices see it in `GET /vault/state` (`pendingDevices`, polled every minute and on window focus or app resume) and ask the user to review it: a banner on every screen, plus a system notification on desktop.
 2. Authorized device T claims N (`POST /vault/claim/:id`); N learns T's public keys (`GET /vault/enrollment`).
 3. Both show a 12-digit code from `BLAKE2b("clipply/v1/sas/" ‖ pkN_box ‖ pkN_sign ‖ pkT_box ‖ pkT_sign)`. The user confirms the match **on both devices**; any substituted key changes the code.
-4. T adds N to the roster, seals the keyring to every roster member and to the recovery key (so a later recovery starts from the current roster), signs, publishes with `authorize: N`. The server authorizes N only if T is authorized and is the device that claimed it.
+4. T adds N to the roster, seals the keyring to every roster member and to the recovery key (so a later recovery starts from the current roster), signs, publishes with `authorize: N`. The server authorizes N only if T is authorized and is the device that claimed it. T seals to exactly the N keys its code was computed from (kept in memory since step 3), never to keys fetched again, so a server cannot swap them in after the user compared codes.
 5. N accepts only an envelope signed by the exact key it confirmed, and only if it is in the roster.
 6. N then re-keys its own local history into the account vault (`ClipLibrary.adoptKeyring`: re-wraps 72-byte DEKs, re-hashes text; bodies and images are not re-encrypted).
+
+**Enroll a device (QR pairing).** Replaces steps 2–3 when one device can scan the other's screen (Android scans with Google's code scanner; every device can show a code). Either side may show it, so a new phone can join a desktop-only account and vice versa.
+1. The showing device S displays `clipply-pair:1:<deviceId>:<fp>:<secret>`: `fp = BLAKE2b-256("clipply/v1/pair-fp/" ‖ pkS_box ‖ pkS_sign)` and a random 16-byte secret that exists only on S's screen and in its memory (10-minute lifetime). The server never sees it.
+2. The scanning device C looks S up in the device list and checks the server-reported keys against `fp`; a substituted key stops pairing here. C then sends `proof = BLAKE2b-256(key = secret, "clipply/v1/pair/" ‖ idC ‖ "/" ‖ idS ‖ "/" ‖ pkC ‖ pkS)`: if C is connected it claims S with the proof (`POST /vault/claim/:id`) and approves S at once (step 4 above); if C is new it names S as its approver (`POST /vault/pair`).
+3. S recomputes the proof from its secret over the keys the server reports for C. A match proves those keys belong to the device that read the QR. A connected S then approves C (step 4); a new S accepts only an envelope signed by C's proven key (step 5). No code comparison is needed: the proof does its job, with 256-bit strength instead of the code's 40.
 
 **Recover (recovery key).** N signs a fresh proof (±5 min) with the recovery sign key; the server verifies it against the recovery public key stored at init and authorizes N, then returns the recovery envelope. N opens it with the recovery box key, adds itself to the roster and to `recovery.knownBy`, and republishes envelopes (and the recovery copy) **signed with the recovery key**, which every roster member already trusts.
 
@@ -91,7 +96,7 @@ If every authorized device **and** the recovery key are lost, the data is unreco
 Protected against (✓ = covered by automated tests):
 - Database / Cloudinary dump; server reading content ✓ (no plaintext in DB, logs or request bodies).
 - Vault keys, device private keys or the recovery key reaching the server ✓.
-- Server substituting keys during enrollment ✓ (code mismatch; envelope from an unconfirmed key rejected).
+- Server substituting keys during enrollment ✓ (code mismatch; envelope from an unconfirmed key rejected; keys swapped after the codes were compared are ignored). With QR pairing ✓: a substituted key fails the QR fingerprint, and a proof not made with the QR secret is ignored.
 - Server injecting a forged envelope or an extra device ✓ (roster + signature + continuity checks).
 - Revoked device reading items written after rotation ✓; revoked device using the API ✓.
 - Wrong / mistyped recovery key ✓; replayed or forged recovery proof ✓; ciphertext tampering, item or field swaps ✓.
@@ -99,6 +104,7 @@ Protected against (✓ = covered by automated tests):
 
 Not protected against (known limitations):
 - A compromised unlocked device (malware with the user's privileges).
+- **A pairing QR seen by someone else** (photo, screen share) while it is shown, if they also control the server or are signed in to the account: the QR is the secret, like the code is. It expires after 10 minutes and is used up by the first successful pairing.
 - **Metadata**: account identity, device names/platforms, item counts, padded sizes, timing, IPs.
 - **Rollback/withholding**: the server can withhold changes or replay an old item revision.
 - **Revoked device colluding with the server, against a device that has not yet refreshed**: until a device has processed the rotation, the revoked device's key is still in its roster, so a forged keyring signed by the revoked device would pass its checks. Devices refresh on every sync, which keeps the window small for devices in use; for a device that was away it lasts until it catches up (replaying history does not widen it: the same stale roster would accept a forged latest envelope today). Closing it fully needs revocations that every member countersigns.

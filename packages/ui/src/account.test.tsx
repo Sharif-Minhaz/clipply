@@ -36,6 +36,8 @@ function fake(initial: Partial<AccountStatus>, devices: DeviceInfo[] = []) {
     replaceRecoveryKey: vi.fn(async () => ({ recoveryKey: 'NEWKY-NEWKY' })),
     setSyncPaused: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
+    pairingQr: vi.fn(async () => 'clipply-pair:1:test'),
+    checkPairing: vi.fn(async (): Promise<{ name: string } | null> => null),
   };
   return Object.assign(client, { set });
 }
@@ -97,7 +99,7 @@ describe('DevicesPanel', () => {
     expect(client.confirmApproval).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: /Codes match, approve/ }));
     await waitFor(() => expect(client.confirmApproval).toHaveBeenCalledWith('new'));
-    expect(screen.getByText(/Online status is not shown/)).toBeTruthy();
+    expect(screen.getByText(/not whether it is online now/)).toBeTruthy();
   });
 
   it('shows the enrollment code on a pending device and accepts on confirmation', async () => {
@@ -132,5 +134,35 @@ describe('JoinRequestBanner', () => {
     render(<JoinRequestBanner account={fake({ signedIn: true, vault: 'needs_enrollment', joinRequests: [{ id: 'p', name: 'Pixel 8' }] })} onReview={() => {}} />);
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByText('Pixel 8')).toBeNull();
+  });
+});
+
+describe('QR pairing', () => {
+  it('shows a pairing QR on a waiting device and switches to connecting once paired', async () => {
+    const client = fake({ signedIn: true, vault: 'needs_enrollment', deviceStatus: 'pending' });
+    let paired = false;
+    client.enrollment = vi.fn(async () => (paired ? { approverName: 'Laptop', code: '1', paired: true } : null));
+    render(<DevicesPanel account={client} />);
+    expect(await screen.findByRole('img', { name: 'Pairing QR code' })).toBeTruthy();
+    paired = true;
+    expect(await screen.findByText(/Connecting to Laptop/, {}, { timeout: 4000 })).toBeTruthy();
+  });
+
+  it('lets a connected device show its QR and reports the device that scanned it', async () => {
+    const user = userEvent.setup();
+    const client = fake({ signedIn: true, email: 'me@example.com', vault: 'ready', deviceStatus: 'authorized' });
+    (client.checkPairing as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null).mockResolvedValue({ name: 'Pixel 8' });
+    render(<DevicesPanel account={client} />);
+    await user.click(await screen.findByRole('button', { name: /Show this device’s QR code/ }));
+    expect(await screen.findByRole('img', { name: 'Pairing QR code' })).toBeTruthy();
+    expect(await screen.findByText('Pixel 8 is connected.', {}, { timeout: 6000 })).toBeTruthy();
+    expect(screen.queryByRole('img', { name: 'Pairing QR code' })).toBeNull();
+  });
+
+  it('offers scanning only where a camera scanner exists', async () => {
+    const client = fake({ signedIn: true, email: 'me@example.com', vault: 'ready', deviceStatus: 'authorized' });
+    render(<DevicesPanel account={client} />);
+    await screen.findByRole('button', { name: /Show this device’s QR code/ });
+    expect(screen.queryByRole('button', { name: /Scan its QR code/ })).toBeNull();
   });
 });

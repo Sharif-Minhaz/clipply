@@ -38,6 +38,8 @@ export const CH = {
   devices: 'devices:list',
   startApproval: 'devices:start-approval',
   approvalCode: 'devices:approval-code',
+  pairingQr: 'devices:pairing-qr',
+  checkPairing: 'devices:check-pairing',
   confirmApproval: 'devices:confirm-approval',
   revoke: 'devices:revoke',
   rename: 'devices:rename',
@@ -109,7 +111,9 @@ export interface DesktopApi {
     signIn(): Promise<{ recoveryKey?: string }>;
     signOut(): Promise<void>;
     syncNow(): Promise<void>;
-    enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null>;
+    enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean; paired?: boolean } | null>;
+    pairingQr(): Promise<string>;
+    checkPairing(): Promise<{ name: string } | null>;
     acceptEnrollment(): Promise<void>;
     recover(recoveryKey: string): Promise<void>;
     devices(): Promise<DeviceInfo[]>;

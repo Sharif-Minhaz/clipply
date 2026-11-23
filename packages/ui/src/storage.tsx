@@ -29,22 +29,27 @@ export function StoragePanel() {
   if (!stats) return null;
   const kinds = (Object.keys(stats.byKind) as ClipKind[]).sort((a, b) => stats.byKind[b]!.bytes - stats.byKind[a]!.bytes);
   return (
-    <div className="space-y-2 text-sm">
-      <p>
-        <span className="font-semibold">{stats.count} clip{stats.count === 1 ? '' : 's'}</span>, {formatBytes(stats.bytes)} on this device
-        {stats.kept > 0 && <span className="text-muted">. {stats.kept} pinned or favorite.</span>}
+    <div className="space-y-3 text-sm">
+      <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+        <span className="text-ink">On this device</span>
+        <span className="text-muted tabular-nums">
+          {stats.count} clip{stats.count === 1 ? '' : 's'}, {formatBytes(stats.bytes)}
+          {stats.kept > 0 && <>, {stats.kept} pinned or favorite</>}
+        </span>
       </p>
-      <ul className="space-y-1">
-        {kinds.map((k) => (
-          <li key={k} className="flex items-center gap-2">
-            <span className="flex-1">{LABEL[k]}</span>
-            <span className="text-sm text-muted tabular-nums">{stats.byKind[k]!.count} clips, {formatBytes(stats.byKind[k]!.bytes)}</span>
-            <button type="button" aria-label={`Clear ${LABEL[k]}`} onClick={() => clear([k], `all ${LABEL[k].toLowerCase()}`)} className="rounded-md px-2 py-0.5 text-sm text-danger hover:bg-danger/10">
-              Clear
-            </button>
-          </li>
-        ))}
-      </ul>
+      {kinds.length > 0 && (
+        <ul className="divide-y divide-line rounded-xl border border-line">
+          {kinds.map((k) => (
+            <li key={k} className="flex items-center gap-3 py-1.5 pr-1.5 pl-3.5">
+              <span className="flex-1 text-ink">{LABEL[k]}</span>
+              <span className="text-xs text-muted tabular-nums">{stats.byKind[k]!.count} clips, {formatBytes(stats.byKind[k]!.bytes)}</span>
+              <button type="button" aria-label={`Clear ${LABEL[k]}`} onClick={() => clear([k], `all ${LABEL[k].toLowerCase()}`)} className="rounded-lg px-2.5 py-1 text-sm font-semibold text-danger hover:bg-danger/10">
+                Clear
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <button
         type="button"
         disabled={stats.count === stats.kept}
@@ -84,16 +89,16 @@ export function BackupPanel({ actions }: { actions: BackupActions }) {
     }, (e: unknown) => setNote(e instanceof Error ? e.message.replace(/^\w*Error: /, '') : String(e))).finally(() => setBusy(false));
   };
   const long = passphrase.length >= MIN_PASSPHRASE;
-  const input = 'w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm';
+  const input = 'w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm';
 
   return (
-    <div className="space-y-2 text-sm">
+    <div className="space-y-3 text-sm">
       <p className="text-xs text-muted">
         Backups are encrypted with a passphrase you choose (at least {MIN_PASSPHRASE} characters). Clipply cannot open a backup without it.
       </p>
       <input type="password" aria-label="Backup passphrase" placeholder="Passphrase" autoComplete="new-password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} className={input} />
       <input type="password" aria-label="Repeat passphrase (export only)" placeholder="Repeat passphrase to export" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={input} />
-      <div className="flex gap-2">
+      <div className="flex gap-2 *:flex-1 sm:*:flex-none">
         <button
           type="button"
           disabled={busy || !long || confirm !== passphrase}

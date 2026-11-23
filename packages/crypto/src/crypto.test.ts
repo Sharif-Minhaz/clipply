@@ -10,6 +10,7 @@ import {
   openKeyringEnvelope, openMeta, openPart, openRecoveryEnvelope, parseKeyring, parseRecoveryKey,
   recoveryProofMessage, recoveryPublicKeys, rosterEntry, rotateKeyring, sealKeyringFor, sealMeta, sealPart,
   sealRecoveryEnvelope, serializeKeyring, signRecoveryProof, unwrapDek, withRecovery, withRoster, wrapDek,
+  matchesFingerprint, pairingFingerprint, pairingProof, pairingSecret, verifyPairingProof,
 } from './index';
 
 beforeAll(initCrypto);
@@ -253,5 +254,31 @@ describe('passphrase backup', () => {
     await expect(openWithPassphrase('correct horse battery', new Uint8Array([...weaker, ...file.subarray(text.length)]))).rejects.toThrow(/wrong passphrase/);
     await expect(openWithPassphrase('x', utf8('hello'))).rejects.toThrow(/not a Clipply backup/);
     await expect(sealWithPassphrase('short', utf8('x'))).rejects.toThrow(/at least/);
+  });
+});
+
+describe('QR pairing', () => {
+  const pub = (k: ReturnType<typeof generateDeviceKeys>, id: string) => ({ id, boxPublicKey: k.box.publicKey, signPublicKey: k.sign.publicKey });
+  let a: ReturnType<typeof pub>;
+  let b: ReturnType<typeof pub>;
+  beforeAll(() => {
+    a = pub(generateDeviceKeys(), ID_A);
+    b = pub(generateDeviceKeys(), ID_B);
+  });
+
+  it('accepts only the proof made with the QR secret over exactly these two devices', () => {
+    const secret = pairingSecret();
+    const proof = pairingProof(secret, a, b);
+    expect(verifyPairingProof(secret, a, b, proof)).toBe(true);
+    expect(verifyPairingProof(pairingSecret(), a, b, proof)).toBe(false); // the server never saw the secret
+    expect(verifyPairingProof(secret, b, a, proof)).toBe(false); // roles are bound
+    expect(verifyPairingProof(secret, pub(generateDeviceKeys(), ID_A), b, proof)).toBe(false); // substituted scanner key
+    expect(verifyPairingProof(secret, a, b, flip(proof))).toBe(false);
+  });
+
+  it('matches a fingerprint only for the same keys', () => {
+    expect(matchesFingerprint(a, pairingFingerprint(a))).toBe(true);
+    expect(matchesFingerprint(b, pairingFingerprint(a))).toBe(false);
+    expect(matchesFingerprint(a, pairingFingerprint(a).slice(0, 16))).toBe(false);
   });
 });

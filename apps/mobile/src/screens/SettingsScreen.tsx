@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AppVersion, BackupPanel, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
+import { AppVersion, BackupPanel, selectClass, SettingRow, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { MobileSettings, Runtime } from '../services/runtime';
 
@@ -16,21 +16,18 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
   };
 
   return (
-    <div className="space-y-4 px-4 py-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <span className="text-sm text-muted">Clipply <AppVersion client={rt.updates} className="tabular-nums" /></span>
-      </div>
-      {note && <p role="status" className="rounded-lg bg-clip/15 px-4 py-3 text-sm">{note}</p>}
+    <div className="space-y-6 px-4 pt-6 pb-10">
+      <header className="flex items-baseline justify-between gap-3">
+        <h1 className="px-1 text-[1.75rem] leading-tight font-bold tracking-tight text-ink">Settings</h1>
+        <span className="px-1 text-xs text-muted">Clipply <AppVersion client={rt.updates} className="tabular-nums" /></span>
+      </header>
+      {note && <p role="status" className="rounded-xl bg-clip/15 px-4 py-3 text-sm">{note}</p>}
       <SettingsSection title="Appearance">
-        <div className="space-y-2">
-          <span className="text-sm">Theme</span>
-          <ThemeSwitcher />
-        </div>
+        <SettingRow label="Theme"><ThemeSwitcher /></SettingRow>
       </SettingsSection>
       <SettingsSection
         title="Capture"
-        description="Android lets only the app on screen read the clipboard, so Clipply never reads it in the background. You can also share to Clipply, use “Save to Clipply” on selected text, or the Quick Settings tile."
+        description="Android lets only the app on screen read the clipboard, so Clipply never reads it in the background. To save from other apps, share to Clipply, use “Save to Clipply” on selected text, or the Quick Settings tile."
       >
         <SwitchRow label="Save clips" hint="Off pauses every way of saving, including screenshots." checked={s.monitoring} onChange={(v) => update({ monitoring: v })} />
         <SwitchRow label="Save the clipboard when I open Clipply" checked={s.captureOnOpen} onChange={(v) => update({ captureOnOpen: v })} />
@@ -43,12 +40,11 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
         />
       </SettingsSection>
       <SettingsSection title="History" description="Pinned and favorite clips are always kept.">
-        <label className="flex items-center justify-between gap-4">
-          <span className="text-sm">Keep clips for</span>
-          <select value={s.retentionDays} onChange={(e) => update({ retentionDays: Number(e.target.value) })} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm">
+        <SettingRow label={<label htmlFor="retention">Keep clips for</label>}>
+          <select id="retention" value={s.retentionDays} onChange={(e) => update({ retentionDays: Number(e.target.value) })} className={selectClass}>
             {RETENTION.map((d) => <option key={d} value={d}>{d === 0 ? 'Forever' : d === 365 ? '1 year' : `${d} day${d > 1 ? 's' : ''}`}</option>)}
           </select>
-        </label>
+        </SettingRow>
         <StoragePanel />
       </SettingsSection>
       <SettingsSection title="Backup" description="Save your history to an encrypted file, or bring one back in.">
@@ -58,7 +54,7 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
         <UpdatePanel client={rt.updates} autoCheck={s.checkUpdates} onAutoCheck={(v) => update({ checkUpdates: v })} />
       </SettingsSection>
       <SettingsSection title="Battery">
-        <p className="text-sm text-muted">
+        <p className="text-sm leading-relaxed text-muted">
           Nothing runs in the background. Clips saved while Clipply is closed upload in one batch once you are online. Clips from your other
           devices arrive when you open the app.
         </p>

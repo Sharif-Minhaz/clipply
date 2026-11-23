@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
+import { Monitor, Moon, Sun, type LucideProps } from 'lucide-react';
 
 export type ThemeChoice = 'light' | 'dark' | 'system';
 const KEY = 'clipply.theme';
-const CHOICES: Array<{ value: ThemeChoice; label: string }> = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'system', label: 'Match system' },
+const CHOICES: Array<{ value: ThemeChoice; label: string; icon: ComponentType<LucideProps> }> = [
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+  { value: 'system', label: 'System', icon: Monitor },
 ];
 
 /** A per-device display preference, so it lives in local storage (it is not synced). */
@@ -27,25 +28,31 @@ export function applyTheme(choice: ThemeChoice): void {
   }
 }
 
+/** Three equal segments with icons; spans the row on phones, sits beside its label on wider screens. */
 export function ThemeSwitcher() {
   const [choice, setChoice] = useState<ThemeChoice>(loadTheme);
   return (
-    <div role="radiogroup" aria-label="Appearance" className="inline-flex rounded-lg border border-line bg-surface p-0.5">
-      {CHOICES.map((c) => (
-        <button
-          key={c.value}
-          type="button"
-          role="radio"
-          aria-checked={choice === c.value}
-          onClick={() => {
-            setChoice(c.value);
-            applyTheme(c.value);
-          }}
-          className={`rounded-md px-3 py-1 text-sm transition-colors ${choice === c.value ? 'bg-raised font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'}`}
-        >
-          {c.label}
-        </button>
-      ))}
+    <div role="radiogroup" aria-label="Appearance" className="grid w-full grid-cols-3 gap-0.5 rounded-xl border border-line bg-surface p-1 sm:w-auto">
+      {CHOICES.map((c) => {
+        const Icon = c.icon;
+        const on = choice === c.value;
+        return (
+          <button
+            key={c.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => {
+              setChoice(c.value);
+              applyTheme(c.value);
+            }}
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${on ? 'bg-raised font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'}`}
+          >
+            <Icon aria-hidden className={`size-4 ${on ? 'text-accent' : ''}`} />
+            {c.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

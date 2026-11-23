@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AppVersion, BackupPanel, buttonClass, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
+import { AppVersion, BackupPanel, buttonClass, selectClass, SettingRow, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { DesktopStatus } from '../../electron/shared/api';
 import type { Settings } from '../../electron/main/settings';
@@ -34,18 +34,15 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
   if (!settings) return <div className="p-8 text-sm text-muted">Loading settings…</div>;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 px-6 py-8">
-      <div className="flex items-baseline justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <span className="text-sm text-muted">Clipply <AppVersion client={window.clipply.updates} className="tabular-nums" /></span>
-      </div>
-      {message && <p role="status" className="rounded-lg bg-clip/15 px-4 py-3 text-sm text-ink">{message}</p>}
+    <div className="mx-auto max-w-2xl space-y-7 px-8 pt-8 pb-12">
+      <header className="flex items-baseline justify-between gap-3">
+        <h1 className="px-1 text-[1.75rem] leading-tight font-bold tracking-tight text-ink">Settings</h1>
+        <span className="px-1 text-xs text-muted">Clipply <AppVersion client={window.clipply.updates} className="tabular-nums" /></span>
+      </header>
+      {message && <p role="status" className="rounded-xl bg-clip/15 px-4 py-3 text-sm text-ink">{message}</p>}
 
       <SettingsSection title="Appearance">
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-sm">Theme</span>
-          <ThemeSwitcher />
-        </div>
+        <SettingRow label="Theme"><ThemeSwitcher /></SettingRow>
       </SettingsSection>
 
       <SettingsSection title="Capture" description="Copies flagged as passwords by password managers are never saved.">
@@ -82,16 +79,11 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
       </SettingsSection>
 
       <SettingsSection title="History" description="Pinned and favorite clips are always kept.">
-        <label className="flex items-center justify-between gap-4">
-          <span className="text-sm">Keep clips for</span>
-          <select
-            value={settings.retentionDays}
-            onChange={(e) => void update({ retentionDays: Number(e.target.value) })}
-            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm"
-          >
+        <SettingRow label={<label htmlFor="retention">Keep clips for</label>}>
+          <select id="retention" value={settings.retentionDays} onChange={(e) => void update({ retentionDays: Number(e.target.value) })} className={selectClass}>
             {RETENTION.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
           </select>
-        </label>
+        </SettingRow>
         <StoragePanel />
       </SettingsSection>
 
@@ -102,11 +94,11 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
       <SettingsSection title="Desktop">
         <SwitchRow label="Start Clipply when I log in" checked={settings.launchAtLogin} onChange={(v) => void update({ launchAtLogin: v })} />
         <SwitchRow label="Keep running in the tray when the window is closed" checked={settings.closeToTray} onChange={(v) => void update({ closeToTray: v })} />
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5">
+          <span className="text-sm font-medium">
             Open Clipply with <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 font-sans text-xs font-semibold">Super</kbd>{' + '}
             <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 font-sans text-xs font-semibold">V</kbd>
-            {status?.session === 'wayland' && <span className="mt-0.5 block text-xs text-muted">Added as a GNOME custom shortcut. GNOME’s notification list moves to Super + M.</span>}
+            {status?.session === 'wayland' && <span className="mt-0.5 block text-xs font-normal text-muted">Added as a GNOME custom shortcut. GNOME’s notification list moves to Super + M.</span>}
           </span>
           {status?.gnomeShortcut ? (
             <span className="text-sm font-semibold text-accent">Ready</span>
@@ -137,7 +129,7 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
       </SettingsSection>
 
       <SettingsSection title="Security" description="History is encrypted on disk with XChaCha20-Poly1305. The keys live in your system keyring.">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2.5 text-sm">
           <dt className="text-muted">Key storage</dt>
           <dd>{status?.keyringBackend === 'gnome_libsecret' ? 'GNOME Keyring' : status?.keyringBackend}</dd>
           <dt className="text-muted">Clipboard access</dt>

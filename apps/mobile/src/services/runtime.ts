@@ -350,6 +350,12 @@ export async function boot(): Promise<Runtime> {
     devices: () => account.devices(),
     startApproval: (id) => account.startApproval(id),
     approvalCode: (id) => account.approvalCode(id),
+    pairingQr: () => account.pairingQr(),
+    checkPairing: () => account.checkPairing(),
+    scanPairing: async () => {
+      const { text } = await ClipplyNative.scanQr();
+      return text ? account.pairWithQr(text) : null;
+    },
     confirmApproval: (id) => account.confirmApproval(id),
     revoke: (id) => account.revoke(id),
     rename: (id, name) => account.rename(id, name),

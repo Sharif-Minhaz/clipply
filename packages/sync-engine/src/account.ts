@@ -7,8 +7,9 @@ import type { DevicePlatform } from '@clipply/shared-schemas';
 import type { ClipLibrary } from './library';
 import { SYNC_CURSOR, SyncEngine, type BlobDownloader, type BlobUploader } from './sync';
 import {
-  acceptEnrollment, approveDevice, createAccountVault, enrollmentCodeFor, recoverVault, refreshKeyring, replaceRecoveryKey, revokeAndRotate, UntrustedEnvelopeError,
-  type DeviceIdentity, type DevicePublicKeys, type RefreshResult,
+  acceptEnrollment, answerPairing, approveDevice, checkPairingProof, createAccountVault, createPairingOffer, enrollmentCodeFor, parsePairingQr,
+  recoverVault, refreshKeyring, replaceRecoveryKey, revokeAndRotate, UntrustedEnvelopeError,
+  type DeviceIdentity, type DevicePublicKeys, type PairingOffer, type RefreshResult,
 } from './vault';
 
 export interface StoredSession {
@@ -74,6 +75,7 @@ export interface AccountDeps {
 const VAULT_VERSION = 'vault.version';
 const SYNC_PAUSED = 'sync.paused';
 const ACCESS_SKEW_MS = 60_000;
+const PAIRING_TTL_MS = 10 * 60_000;
 
 /**
  * Account, vault and sync orchestration shared by desktop and Android. Platform code supplies only
@@ -83,7 +85,12 @@ export class AccountController {
   readonly api: ApiClient;
   readonly engine: SyncEngine;
   private session: StoredSession | null = null;
-  private shownApprover: { id: string; name: string; keys: DevicePublicKeys; code: string } | null = null;
+  /** `paired`: authenticated by a QR pairing proof instead of a code the user compares. */
+  private shownApprover: { id: string; name: string; keys: DevicePublicKeys; code: string; paired?: boolean } | null = null;
+  /** Keys of devices this one started approving, exactly as the shown code covered them. */
+  private readonly approving = new Map<string, DevicePublicKeys>();
+  /** Pairing QRs this device showed and that have not expired (their secrets never leave this process). */
+  private pairings: Array<{ offer: PairingOffer; expiresAt: number }> = [];
   private status: AccountStatus;
   private readonly listeners = new Set<() => void>();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -200,6 +207,8 @@ export class AccountController {
       this.d.library.setDeviceId(this.identity.deviceId);
     }
     this.shownApprover = null;
+    this.pairings = [];
+    this.approving.clear();
     this.status = { configured: this.status.configured, signedIn: false, vault: 'none', sync: { state: 'off', pending: 0 } };
     this.emit();
   }
@@ -264,7 +273,9 @@ export class AccountController {
   // ── enrollment: new-device side ────────────────────────────────────────────────────────
 
   /** Pending device: who claimed us and the code to compare, or null while nobody has. */
-  async enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null> {
+  async enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean; paired?: boolean } | null> {
+    // Paired by QR: nothing to compare; join as soon as the approver has published our envelope.
+    if (this.shownApprover?.paired) return this.finishPairing();
     if (this.status.deviceStatus === 'authorized') {
       // Already approved, but this device has no keyring it can verify the latest envelope with: either
       // it was never accepted here, or (`rejoin`) it was a member that fell too far behind. The
@@ -276,11 +287,84 @@ export class AccountController {
       const rejoin = !!rosterEntry(this.d.getKeyring(), this.identity.deviceId);
       return { approverName: this.shownApprover.name, code: this.shownApprover.code, approved: true, ...(rejoin ? { rejoin } : {}) };
     }
-    const { approver } = await this.api.enrollment();
+    const { approver, proof } = await this.api.enrollment();
     if (!approver) return this.shownApprover ? { approverName: this.shownApprover.name, code: this.shownApprover.code } : null;
     const code = enrollmentCodeFor(this.publicKeys(), approver.keys);
+    // The approver scanned our QR: its proof (keyed by the QR secret the server never saw) vouches for its keys.
+    if (proof && this.liveOffers().some((o) => checkPairingProof(o, this.identity, approver, proof))) {
+      this.pairings = [];
+      this.shownApprover = { ...approver, code, paired: true };
+      return this.finishPairing();
+    }
     this.shownApprover = { ...approver, code };
     return { approverName: approver.name, code };
+  }
+
+  private async finishPairing(): Promise<{ approverName: string; code: string; paired: true }> {
+    const { name, code } = this.shownApprover!;
+    try {
+      await this.acceptEnrollment();
+    } catch (error) {
+      // No envelope yet: the approver is still sealing the keyring. The next poll tries again.
+      if (!(error instanceof ApiError && error.status === 404)) throw error;
+    }
+    return { approverName: name, code, paired: true };
+  }
+
+  // ── QR pairing ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The pairing QR this device shows: a new device shows it to a connected one, or a connected
+   * device shows it to a new one. Each code is valid for 10 minutes.
+   */
+  async pairingQr(): Promise<string> {
+    if (!this.session) throw new Error('sign in first');
+    const offer = createPairingOffer(this.identity);
+    // Earlier codes stay valid until they expire: one may have been scanned just before the screen refreshed it.
+    this.pairings = [...this.pairings.filter((p) => p.expiresAt > this.now()), { offer, expiresAt: this.now() + PAIRING_TTL_MS }];
+    return offer.text;
+  }
+
+  /**
+   * Scanner side. A connected device scanning a new one approves it at once; a new device scanning
+   * a connected one asks it to approve (that device finishes while it shows its code).
+   */
+  async pairWithQr(text: string): Promise<{ name: string }> {
+    const qr = parsePairingQr(text);
+    const shower = (await this.api.listDevices()).devices.find((d) => d.id === qr.deviceId);
+    if (this.status.vault === 'ready' && this.status.deviceStatus === 'authorized') {
+      if (shower?.status !== 'pending') throw new Error('This code is not from a device waiting to join your account.');
+      const proof = answerPairing(qr, this.identity, shower);
+      await this.api.claimDevice(shower.id, { proof });
+      await this.approve(shower.id, shower.keys);
+      return { name: shower.name };
+    }
+    if (this.status.vault === 'needs_enrollment' && this.status.deviceStatus === 'pending') {
+      if (shower?.status !== 'authorized') throw new Error('Scan the code shown on a device that is already connected to your account.');
+      const proof = answerPairing(qr, this.identity, shower);
+      await this.api.pairDevice({ approverId: shower.id, proof });
+      this.shownApprover = { id: shower.id, name: shower.name, keys: shower.keys, code: enrollmentCodeFor(this.publicKeys(), shower.keys), paired: true };
+      return { name: shower.name };
+    }
+    throw new Error('This device cannot pair right now.');
+  }
+
+  /** Showing side, polled while a connected device shows its QR: approves the device that scanned it. */
+  async checkPairing(): Promise<{ name: string } | null> {
+    const offers = this.liveOffers();
+    if (offers.length === 0 || this.status.vault !== 'ready') return null;
+    for (const d of (await this.api.listDevices()).devices) {
+      const proof = d.pairingProof;
+      if (d.status !== 'pending' || !proof || !offers.some((o) => checkPairingProof(o, this.identity, d, proof))) continue;
+      this.pairings = [];
+      await this.approve(d.id, d.keys);
+      return { name: d.name };
+    }
+    return null;
+  }
+
+  private liveOffers(): PairingOffer[] {
+    return this.pairings.filter((p) => p.expiresAt > this.now()).map((p) => p.offer);
   }
 
   /**
@@ -328,6 +412,8 @@ export class AccountController {
     const pending = (await this.api.listDevices()).devices.find((x) => x.id === deviceId && x.status === 'pending');
     if (!pending) throw new Error('device is not waiting for approval');
     await this.api.claimDevice(deviceId);
+    // confirmApproval seals to exactly these keys, the ones the code was computed from.
+    this.approving.set(deviceId, pending.keys);
     return { code: enrollmentCodeFor(pending.keys, this.publicKeys()) };
   }
 
@@ -343,9 +429,16 @@ export class AccountController {
 
   /** After the user confirmed the codes match on this device. */
   async confirmApproval(deviceId: string): Promise<void> {
-    const pending = (await this.api.listDevices()).devices.find((x) => x.id === deviceId && x.status === 'pending');
-    if (!pending) throw new Error('device is not waiting for approval');
-    await this.d.setKeyring(await approveDevice(this.api, this.identity, this.d.getKeyring(), { id: deviceId, keys: pending.keys }));
+    // Not re-fetched: a server could otherwise swap in its own keys after the codes were compared.
+    const keys = this.approving.get(deviceId);
+    if (!keys) throw new Error('Tap Approve again to show a fresh code.');
+    await this.approve(deviceId, keys);
+    this.approving.delete(deviceId);
+  }
+
+  /** Seals the keyring to a pending device whose keys were verified (codes or QR pairing). */
+  private async approve(deviceId: string, keys: DevicePublicKeys): Promise<void> {
+    await this.d.setKeyring(await approveDevice(this.api, this.identity, this.d.getKeyring(), { id: deviceId, keys }));
     const state = await this.api.vaultState();
     await kvRepo(this.d.db).set(VAULT_VERSION, state.version);
     this.showJoinRequests(state.pendingDevices);

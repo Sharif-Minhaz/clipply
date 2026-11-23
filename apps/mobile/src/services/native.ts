@@ -30,6 +30,8 @@ export interface ClipplyNativePlugin {
   drainInbox(): Promise<{ entries: InboxEntry[] }>;
   /** Queues the constraint-aware background upload (WorkManager, unique, network-required). */
   scheduleUpload(): Promise<void>;
+  /** Google code scanner (Play services UI, no camera permission); `text` is null when cancelled. */
+  scanQr(): Promise<{ text: string | null }>;
   /** Mirrors the per-device sync pause for the background upload worker. */
   setBackgroundUpload(options: { enabled: boolean }): Promise<void>;
   /** System "save as" picker (Storage Access Framework); writes base64 bytes. */

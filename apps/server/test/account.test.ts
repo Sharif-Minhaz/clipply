@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createKeyring, fromUtf8, generateDeviceKeys, type Keyring } from '@clipply/crypto';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createKeyring, fromUtf8, generateDeviceKeys, toB64, type Keyring } from '@clipply/crypto';
+
+const fakeKeysFor = () => {
+  const k = generateDeviceKeys();
+  return { boxPublicKey: toB64(k.box.publicKey), signPublicKey: toB64(k.sign.publicKey) };
+};
 import { migrate } from '@clipply/database';
 import { openTestDb } from '@clipply/database/testing';
 import { createLogger } from '@clipply/logger';
@@ -145,6 +150,102 @@ describe('AccountController (shared by desktop and Android)', () => {
     const tabletId = desk.account.getStatus().joinRequests![0]!.id;
     await desk.account.revoke(tabletId);
     expect(desk.account.getStatus().joinRequests).toEqual([]);
+  });
+
+  describe('QR pairing', () => {
+    // Each test signs in several devices; keep the auth rate limit (30 a minute) out of the way.
+    beforeEach(() => void (h.clock.now += 61_000));
+    afterAll(() => void (h.clock.now += 61_000));
+
+    const fakeKeys = () => {
+      const k = generateDeviceKeys();
+      return { boxPublicKey: toB64(k.box.publicKey), signPublicKey: toB64(k.sign.publicKey) };
+    };
+
+    it('a connected phone scans the new desktop: no codes to compare', async () => {
+      const phone = await app('qa', 'Phone');
+      await phone.library.capture({ type: 'text', text: 'from the phone' });
+      await phone.account.signIn();
+      const desk = await app('qa', 'Desk');
+      await desk.account.signIn();
+      const qr = await desk.account.pairingQr();
+
+      expect(await phone.account.pairWithQr(qr)).toEqual({ name: 'Desk' });
+      // The desktop's next poll verifies the phone's proof and joins on its own.
+      expect(await desk.account.enrollment()).toMatchObject({ approverName: 'Phone', paired: true });
+      expect(desk.account.getStatus()).toMatchObject({ deviceStatus: 'authorized', vault: 'ready' });
+      await desk.account.sync();
+      expect(desk.library.list().map((v) => v.preview)).toContain('from the phone');
+      expect(phone.ring().roster).toHaveLength(2);
+    });
+
+    it('a new phone scans the connected desktop, which approves it while showing its code', async () => {
+      const desk = await app('qb', 'Desk');
+      await desk.account.signIn();
+      const qr = await desk.account.pairingQr();
+      const phone = await app('qb', 'Phone');
+      await phone.account.signIn();
+
+      expect(await desk.account.checkPairing()).toBeNull(); // nobody scanned yet
+      expect(await phone.account.pairWithQr(qr)).toEqual({ name: 'Desk' });
+      expect(await phone.account.enrollment()).toMatchObject({ approverName: 'Desk', paired: true }); // waiting for Desk
+      expect(phone.account.getStatus().vault).toBe('needs_enrollment');
+      expect(await desk.account.checkPairing()).toEqual({ name: 'Phone' });
+      await phone.account.enrollment();
+      expect(phone.account.getStatus()).toMatchObject({ deviceStatus: 'authorized', vault: 'ready' });
+      expect(await desk.account.checkPairing()).toBeNull(); // the code is used up
+    });
+
+    it('refuses keys the server substituted for the device in the QR', async () => {
+      const phone = await app('qc', 'Phone');
+      await phone.account.signIn();
+      const desk = await app('qc', 'Desk');
+      await desk.account.signIn();
+      const qr = await desk.account.pairingQr();
+      const deskId = qr.split(':')[2]!;
+      await h.store.c.devices.updateOne({ _id: deskId }, { $set: { keys: fakeKeys() } });
+      await expect(phone.account.pairWithQr(qr)).rejects.toThrow(/do not match the code/);
+      expect((await phone.account.devices()).find((d) => d.id === deskId)?.status).toBe('pending');
+    });
+
+    it('ignores a proof that was not made with the QR secret', async () => {
+      const desk = await app('qd', 'Desk');
+      await desk.account.signIn();
+      await desk.account.pairingQr();
+      const phone = await app('qd', 'Phone');
+      await phone.account.signIn();
+      const deskId = (await phone.account.devices()).find((d) => d.name === 'Desk')!.id;
+      // A malicious server (or someone who never saw the screen) names Desk as approver with a made-up proof.
+      await phone.account.api.pairDevice({ approverId: deskId, proof: toB64(new Uint8Array(32).fill(7)) });
+      expect(await desk.account.checkPairing()).toBeNull();
+      expect((await desk.account.devices()).find((d) => d.name === 'Phone')?.status).toBe('pending');
+    });
+
+    it('rejects a code from a device in another account', async () => {
+      const mine = await app('qe', 'Mine');
+      await mine.account.signIn();
+      const theirs = await app('qf', 'Theirs');
+      await theirs.account.signIn();
+      const stranger = await app('qf', 'Stranger');
+      await stranger.account.signIn();
+      await expect(mine.account.pairWithQr(await stranger.account.pairingQr())).rejects.toThrow(/not from a device waiting/);
+      await expect(mine.account.pairWithQr('hello')).rejects.toThrow(/not a Clipply pairing code/);
+    });
+  });
+
+  it('approves the exact keys the codes were compared for, even if the server swaps them afterwards', async () => {
+    const desk = await app('qg', 'Desk');
+    await desk.account.signIn();
+    const phone = await app('qg', 'Phone');
+    await phone.account.signIn();
+    const p = (await desk.account.devices()).find((d) => d.status === 'pending')!;
+    await desk.account.startApproval(p.id);
+    await phone.account.enrollment();
+    await h.store.c.devices.updateOne({ _id: p.id }, { $set: { keys: fakeKeysFor() } });
+    await desk.account.confirmApproval(p.id);
+    // Sealed to the phone's real keys, so the phone can open it.
+    await phone.account.acceptEnrollment();
+    expect(phone.account.getStatus()).toMatchObject({ vault: 'ready' });
   });
 
   const joinVia = async (approver: Awaited<ReturnType<typeof app>>, sub: string, name: string) => {
