@@ -59,7 +59,12 @@ if (process.argv.includes('--clipboard-helper')) {
   // A second launch (`clipply --toggle` from a GNOME shortcut) is forwarded to the first instance.
   app.quit();
 } else {
-  void main();
+  // A failed start must not leave a window up with nothing behind it: report it and exit.
+  main().catch((error: unknown) => {
+    log.error('startup failed', { error });
+    dialog.showErrorBox('Clipply could not start', error instanceof Error ? (error.stack ?? error.message) : String(error));
+    app.exit(1);
+  });
 }
 
 async function main(): Promise<void> {
@@ -314,18 +319,19 @@ async function main(): Promise<void> {
     }
   });
 
-  // An AppImage update lands under a new versioned file name, and a switch between AppImage and .deb
-  // changes the path entirely: point autostart and the shortcut at this binary.
-  if (app.isPackaged) {
-    if (core?.settings.launchAtLogin) setAutostart(true, launchCommand);
-    void gnomeShortcutInstalled().then((on) => (on ? installShortcut() : undefined)).catch((error: unknown) => log.debug('shortcut refresh failed', { error }));
-  }
-
   if (core) {
     await core.start();
     await account?.init();
     account?.startScheduler();
     log.info('clipboard history ready', { items: library!.list().length, corrupt: library!.corruptCount });
+  }
+
+  // An AppImage update lands under a new versioned file name, and a switch between AppImage and .deb
+  // changes the path entirely: point autostart and the shortcut at this binary.
+  // After core.start(): core.settings throws until settings are loaded.
+  if (app.isPackaged) {
+    if (core?.settings.launchAtLogin) setAutostart(true, launchCommand);
+    void gnomeShortcutInstalled().then((on) => (on ? installShortcut() : undefined)).catch((error: unknown) => log.debug('shortcut refresh failed', { error }));
   }
 
   const tray = createTray({

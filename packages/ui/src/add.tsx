@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react';
-import { File, Image, Plus, Type, X, type LucideProps } from 'lucide-react';
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from 'react';
+import { FilePlus, ImagePlus, NotebookPen, Plus, X, type LucideProps } from 'lucide-react';
 import { MAX_CONTENT_BYTES } from '@clipply/shared-schemas';
 import type { ManualInput } from '@clipply/sync-engine';
 
@@ -12,6 +12,8 @@ export interface AddAction {
   icon: ComponentType<LucideProps>;
   label: string;
   onClick: () => void;
+  /** Colour of the choice (a CSS colour, e.g. `var(--color-kind-url)`); the accent by default. */
+  tone?: string;
 }
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message.replace(/^\w+Error: /, '') : String(e));
@@ -79,9 +81,10 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
     else inputs[what].current?.click();
   };
   const items: AddAction[] = [
-    { icon: Type, label: 'Text', onClick: () => choose('text') },
-    { icon: Image, label: 'Image', onClick: () => choose('image') },
-    { icon: File, label: 'File', onClick: () => choose('file') },
+    // Each choice wears its clip type's colour, the same as the cards it creates.
+    { icon: NotebookPen, label: 'Text', tone: 'var(--color-kind-text)', onClick: () => choose('text') },
+    { icon: ImagePlus, label: 'Image', tone: 'var(--color-kind-image)', onClick: () => choose('image') },
+    { icon: FilePlus, label: 'File', tone: 'var(--color-kind-file)', onClick: () => choose('file') },
     ...actions.map((a) => ({ ...a, onClick: () => (setMenu(false), a.onClick()) })),
   ];
 
@@ -138,21 +141,26 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
   );
 }
 
-function MenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<LucideProps>; label: string; onClick: () => void }) {
+const toneStyle = (tone: string | undefined): CSSProperties => ({ '--tone': tone ?? 'var(--color-accent)' }) as CSSProperties;
+
+function MenuItem({ icon: Icon, label, onClick, tone }: AddAction) {
   return (
-    <button type="button" role="menuitem" onClick={onClick} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[0.9375rem] text-ink hover:bg-surface">
-      <Icon aria-hidden className="size-[18px] text-muted" />
+    <button type="button" role="menuitem" onClick={onClick} style={toneStyle(tone)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[0.9375rem] text-ink hover:bg-surface">
+      <Icon aria-hidden className="size-[18px] text-(--tone)" />
       {label}
     </button>
   );
 }
 
-/** Speed-dial choice: a small round button with its label beside it (always shown: touch has no hover). */
-function DialAction({ icon: Icon, label, onClick }: AddAction) {
+/**
+ * Speed-dial choice: a small round button with its label beside it (always shown: touch has no hover).
+ * Filled with its tone; the icon takes the surface colour, so it reads on both the light and dark tones.
+ */
+function DialAction({ icon: Icon, label, onClick, tone }: AddAction) {
   return (
-    <button type="button" role="menuitem" onClick={onClick} className="flex items-center gap-3">
+    <button type="button" role="menuitem" onClick={onClick} style={toneStyle(tone)} className="flex items-center gap-3">
       <span className="rounded-md bg-frame px-2.5 py-1 text-sm font-medium whitespace-nowrap text-frame-ink shadow-md">{label}</span>
-      <span aria-hidden className="flex size-12 items-center justify-center rounded-full bg-raised text-ink shadow-lg">
+      <span aria-hidden className="flex size-12 items-center justify-center rounded-full bg-(--tone) text-raised shadow-lg ring-2 ring-white/25">
         <Icon className="size-5" />
       </span>
     </button>

@@ -27,8 +27,8 @@ export const KIND_ICON: Record<ClipKind, ComponentType<LucideProps>> = {
 
 export function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v: string) => void; inputRef?: React.Ref<HTMLInputElement> }) {
   return (
-    <label className="flex items-center gap-2.5 rounded-full bg-raised px-4 py-3 shadow-[0_6px_20px_-12px_rgb(8_60_70/0.45)] ring-1 ring-line/70 focus-within:ring-2 focus-within:ring-accent in-data-hero:bg-white/12 in-data-hero:shadow-none in-data-hero:ring-white/20 in-data-hero:backdrop-blur in-data-hero:focus-within:ring-white/70">
-      <Search aria-hidden className="size-5 shrink-0 text-muted in-data-hero:text-white/80" />
+    <label className="flex items-center gap-2.5 rounded-full bg-raised px-4 py-3 shadow-[0_6px_20px_-12px_rgb(8_60_70/0.45)] ring-1 ring-line/70 focus-within:ring-2 focus-within:ring-accent in-data-hero:gap-2 in-data-hero:bg-white/12 in-data-hero:px-3.5 in-data-hero:py-2 in-data-hero:shadow-none in-data-hero:ring-white/20 in-data-hero:backdrop-blur in-data-hero:focus-within:ring-white/70">
+      <Search aria-hidden className="size-5 shrink-0 text-muted in-data-hero:size-4.5 in-data-hero:text-white/80" />
       <input
         ref={inputRef}
         type="search"
@@ -50,7 +50,7 @@ export function KindFilter({ value, onChange, options }: { value: readonly ClipK
   const toggle = (kind: ClipKind): void =>
     onChange(value.includes(kind) ? value.filter((k) => k !== kind) : [...value, kind]);
   return (
-    <div role="group" aria-label="Filter by type" className="grid grid-cols-6 gap-2 sm:flex sm:flex-wrap">
+    <div role="group" aria-label="Filter by type" className="grid grid-cols-6 gap-2 sm:flex sm:flex-wrap in-data-hero:gap-1.5">
       {(options ?? (Object.keys(KIND_LABEL) as ClipKind[])).map((kind) => {
         const on = value.includes(kind);
         const Icon = KIND_ICON[kind];
@@ -61,13 +61,13 @@ export function KindFilter({ value, onChange, options }: { value: readonly ClipK
             aria-pressed={on}
             title={KIND_LABEL[kind]}
             onClick={() => toggle(kind)}
-            className={`flex items-center justify-center gap-1.5 rounded-full px-3.5 py-2 text-sm ring-1 transition-colors ${
+            className={`flex items-center justify-center gap-1.5 rounded-full px-3.5 py-2 text-sm ring-1 transition-colors in-data-hero:py-1.5 ${
               on
                 ? 'bg-strip font-semibold text-white ring-strip in-data-hero:bg-white in-data-hero:text-strip in-data-hero:ring-white'
                 : 'bg-raised font-medium text-ink ring-line hover:ring-accent/60 in-data-hero:bg-white/10 in-data-hero:text-white in-data-hero:ring-white/15 in-data-hero:hover:bg-white/20'
             }`}
           >
-            <Icon aria-hidden className="size-4.5 sm:size-4" />
+            <Icon aria-hidden className="size-4.5 sm:size-4 in-data-hero:size-4" />
             <span className="max-sm:sr-only">{KIND_LABEL[kind]}</span>
           </button>
         );
@@ -96,13 +96,13 @@ export function SearchStrip(props: {
       {...(props.hero ? { 'data-hero': '' } : {})}
       className={`sticky z-10 ${
         props.hero
-          ? `rounded-b-[2rem] bg-hero px-4 pt-4 pb-5 text-white shadow-[0_14px_30px_-16px_rgb(8_40_48/0.7)] ${props.heading ? '-top-16' : 'top-0'}`
+          ? `rounded-b-3xl bg-hero px-3 pt-3 pb-3 text-white shadow-[0_12px_24px_-14px_rgb(8_40_48/0.7)] ${props.heading ? '-top-12' : 'top-0'}`
           : 'top-0 bg-tint px-6 pt-5 pb-4 shadow-[0_12px_16px_-16px_rgb(0_0_0/0.3)]'
       }`}
     >
-      <div className="mx-auto max-w-3xl space-y-3">
-        {/* h-12 + the pt-4 above = the 4rem the header sticks above the top (-top-16). */}
-        {props.heading && <div className="flex h-12 items-center">{props.heading}</div>}
+      <div className={`mx-auto max-w-3xl ${props.hero ? 'space-y-2.5' : 'space-y-3'}`}>
+        {/* h-9 + the pt-3 above = the 3rem the hero header sticks above the top (-top-12). */}
+        {props.heading && <div className="flex h-9 items-center">{props.heading}</div>}
         <div className="flex gap-2">
           <div className="min-w-0 flex-1"><SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} /></div>
           {props.action}
@@ -162,14 +162,14 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
     <article
       aria-label={`${KIND_LABEL[meta.kind]} item`}
       style={{ '--kind': `var(--color-kind-${meta.kind})` } as CSSProperties}
-      className={`relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 rounded-2xl bg-raised py-3 pr-3 pl-4 ring-1 transition-shadow ${
+      className={`relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 rounded-2xl bg-raised py-3 pr-3 pl-4 ring-1 transition-shadow max-sm:gap-x-2.5 max-sm:gap-y-1 max-sm:py-2.5 max-sm:pr-2.5 max-sm:pl-3.5 ${
         selected ? 'ring-2 ring-accent' : 'shadow-[0_1px_2px_rgb(0_0_0/0.04),0_10px_24px_-16px_rgb(8_50_60/0.35)] ring-line/60 hover:shadow-[0_1px_2px_rgb(0_0_0/0.05),0_14px_30px_-14px_rgb(8_50_60/0.4)]'
       }`}
     >
       {/* Inset from the corners rather than a border-left, which bends around the radius. */}
-      <span aria-hidden className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-(--kind)" />
-      <span aria-hidden className="flex size-10 items-center justify-center self-start rounded-xl bg-(--kind)/12 text-(--kind) sm:row-span-3 sm:size-11">
-        <KindIcon className="size-5" />
+      <span aria-hidden className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-(--kind) max-sm:inset-y-3" />
+      <span aria-hidden className="flex size-10 items-center justify-center self-start rounded-xl bg-(--kind)/12 text-(--kind) max-sm:size-8 max-sm:rounded-lg sm:row-span-3 sm:size-11">
+        <KindIcon className="size-5 max-sm:size-4" />
       </span>
       <header className="flex min-w-0 items-center gap-2 text-xs text-muted">
         {onSelect && (selected ? <CheckSquare aria-hidden className="size-4 text-accent" /> : <Square aria-hidden className="size-4" />)}
@@ -204,13 +204,13 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
       >
         {meta.kind === 'image' ? (
           thumb ? (
-            <img src={thumb} alt={meta.title ?? 'Clipboard image'} className="max-h-48 rounded-lg border border-line object-contain" />
+            <img src={thumb} alt={meta.title ?? 'Clipboard image'} className="max-h-48 rounded-lg border border-line object-contain max-sm:max-h-36" />
           ) : (
             <div className="flex h-24 items-center justify-center rounded-lg bg-surface text-sm text-muted">Image</div>
           )
         ) : meta.kind === 'url' ? (
           <div className="space-y-2">
-            <p className="line-clamp-2 break-words text-[1.0625rem] leading-relaxed text-(--kind) underline decoration-(--kind)/40 underline-offset-2">{item.preview}</p>
+            <p className="line-clamp-2 break-words text-[1.0625rem] leading-relaxed text-(--kind) max-sm:text-[0.9375rem] max-sm:leading-snug underline decoration-(--kind)/40 underline-offset-2">{item.preview}</p>
             {(link.imageUrl || link.title) && (
               <div className="overflow-hidden rounded-lg border border-line bg-surface">
                 {link.imageUrl && <img src={link.imageUrl} alt="" loading="lazy" className="max-h-56 w-full object-cover" />}
@@ -219,7 +219,7 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
             )}
           </div>
         ) : (
-          <p className={`line-clamp-4 break-words whitespace-pre-wrap text-ink ${meta.kind === 'code' ? 'font-mono text-[0.84rem] leading-relaxed' : 'text-[1.0625rem] leading-relaxed'}`}>
+          <p className={`line-clamp-4 break-words whitespace-pre-wrap text-ink max-sm:line-clamp-3 ${meta.kind === 'code' ? 'font-mono text-[0.84rem] leading-relaxed max-sm:text-[0.78rem] max-sm:leading-normal' : 'text-[1.0625rem] leading-relaxed max-sm:text-[0.9375rem] max-sm:leading-snug'}`}>
             {item.preview}
           </p>
         )}
@@ -233,9 +233,9 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
           type="button"
           disabled={busy}
           onClick={act(primary)}
-          className="ml-auto flex items-center gap-1.5 rounded-full bg-(--kind)/12 px-4 py-2 text-sm font-semibold text-(--kind) transition-colors hover:bg-(--kind)/20 disabled:opacity-50"
+          className="ml-auto flex items-center gap-1.5 rounded-full bg-(--kind)/12 px-4 py-2 text-sm font-semibold max-sm:gap-1 max-sm:px-3 max-sm:py-1.5 max-sm:text-[0.8125rem] text-(--kind) transition-colors hover:bg-(--kind)/20 disabled:opacity-50"
         >
-          {isFile ? <Download aria-hidden className="size-4" /> : <Copy aria-hidden className="size-4" />}
+          {isFile ? <Download aria-hidden className="size-4 max-sm:size-3.5" /> : <Copy aria-hidden className="size-4 max-sm:size-3.5" />}
           {isFile ? 'Save' : 'Copy'}
         </button>
       </footer>}
@@ -260,11 +260,11 @@ export function IconButton(props: {
       onClick={props.onClick}
       disabled={props.disabled}
       {...(props.pressed !== undefined ? { 'aria-pressed': props.pressed } : {})}
-      className={`flex size-9 items-center justify-center rounded-full transition-colors hover:bg-surface disabled:opacity-50 ${
+      className={`flex size-9 items-center justify-center rounded-full transition-colors hover:bg-surface max-sm:size-8 disabled:opacity-50 ${
         props.danger ? 'text-muted hover:text-danger' : props.pressed ? 'text-accent' : 'text-muted hover:text-ink'
       }`}
     >
-      <Icon aria-hidden className={`size-4.5 ${props.pressed ? 'fill-current' : ''}`} />
+      <Icon aria-hidden className={`size-4.5 max-sm:size-4 ${props.pressed ? 'fill-current' : ''}`} />
     </button>
   );
 }
@@ -339,7 +339,7 @@ export function ClipList(props: {
           ))}
         </ul>
       ) : (
-        <ul className="space-y-3">
+        <ul className="space-y-3 max-sm:space-y-2.5">
           {items.map((item) => (
             <li key={item.id}>
               <ClipCard

@@ -90,18 +90,18 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
     <SearchStrip
       hero
       heading={
-        <div className="flex items-center gap-3">
-          <img src={logo} alt="" className="size-12 rounded-2xl shadow-[0_8px_20px_-8px_rgb(0_0_0/0.6)]" />
+        <div className="flex items-center gap-2.5">
+          <img src={logo} alt="" className="size-9 rounded-xl shadow-[0_6px_14px_-6px_rgb(0_0_0/0.6)]" />
           <div>
-            <h1 className="text-xl leading-tight font-bold tracking-tight">Clipply</h1>
-            <p className="text-xs text-white/80">{hint}</p>
+            <h1 className="text-lg leading-tight font-bold tracking-tight">Clipply</h1>
+            <p className="text-[0.6875rem] leading-tight text-white/80">{hint}</p>
           </div>
         </div>
       }
       query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} action={<SyncButton account={rt.account} />}
       {...(base.kinds ? { kindOptions: base.kinds } : {})}
     />
-    <div className="space-y-3 px-3 pt-3 pb-24">
+    <div className="space-y-2.5 px-3 pt-2.5 pb-24">
       {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} variant="banner" />}
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} layout={grid ? 'grid' : 'list'} />
     </div>
@@ -110,7 +110,7 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
         <AddClip
           dial
           className="fixed right-4 bottom-[calc(6.25rem+env(safe-area-inset-bottom))] z-20"
-          actions={[{ icon: ClipboardPaste, label: 'Save clipboard', onClick: saveClipboard }]}
+          actions={[{ icon: ClipboardPaste, label: 'Save clipboard', tone: 'var(--color-kind-url)', onClick: saveClipboard }]}
         />
       )}
       {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(10.5rem+env(safe-area-inset-bottom))] rounded-xl bg-frame px-4 py-3 text-center text-sm text-frame-ink shadow-lg">{toast}</p>}
