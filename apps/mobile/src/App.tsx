@@ -4,14 +4,15 @@ import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinReque
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
+import logo from './logo.png';
 import { boot, type Runtime } from './services/runtime';
 import { SettingsScreen } from './screens/SettingsScreen';
 
 type Tab = 'clipboard' | 'favorites' | 'pinned' | 'devices' | 'settings';
-const TABS: Array<{ tab: Tab; label: string; icon: typeof Clipboard }> = [
-  { tab: 'clipboard', label: 'Clipboard', icon: Clipboard },
-  { tab: 'favorites', label: 'Favorites', icon: Star },
-  { tab: 'pinned', label: 'Pinned', icon: Pin },
+const TABS: Array<{ tab: Tab; label: string; icon: typeof Clipboard; hint?: string }> = [
+  { tab: 'clipboard', label: 'Clipboard', icon: Clipboard, hint: 'Your copied items' },
+  { tab: 'favorites', label: 'Favorites', icon: Star, hint: 'Your starred clips' },
+  { tab: 'pinned', label: 'Pinned', icon: Pin, hint: 'Your pinned clips' },
   { tab: 'devices', label: 'Devices', icon: Laptop },
   { tab: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
@@ -44,23 +45,24 @@ function Shell({ rt }: { rt: Runtime }) {
         {tab !== 'devices' && (
           <div className="px-4 pt-4 empty:hidden"><JoinRequestBanner account={rt.account} onReview={() => setTab('devices')} /></div>
         )}
-        {tab === 'clipboard' && <History rt={rt} base={{}} empty="Nothing saved yet. Tap + then Save clipboard to save what you copied, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
-        {tab === 'favorites' && <History rt={rt} base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
-        {tab === 'pinned' && <History rt={rt} base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
+        {tab === 'clipboard' && <History rt={rt} tab={0} base={{}} empty="Nothing saved yet. Tap + then Save clipboard to save what you copied, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
+        {tab === 'favorites' && <History rt={rt} tab={1} base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
+        {tab === 'pinned' && <History rt={rt} tab={2} base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
         {tab === 'devices' && <div className="space-y-6 px-4 pt-6 pb-10"><h1 className="px-1 text-[1.75rem] leading-tight font-bold tracking-tight text-ink">Devices</h1><DevicesPanel account={rt.account} /></div>}
         {tab === 'settings' && <SettingsScreen rt={rt} />}
       </main>
-      <nav aria-label="Main" className="grid grid-cols-5 bg-frame pb-[env(safe-area-inset-bottom)] text-frame-muted">
+      <nav aria-label="Main" className="mx-3 mb-[calc(env(safe-area-inset-bottom)+0.5rem)] grid grid-cols-5 rounded-3xl bg-raised p-1.5 text-muted shadow-[0_10px_30px_-10px_rgb(8_50_60/0.35)] ring-1 ring-line/60">
         {TABS.map(({ tab: t, label, icon: Icon }) => (
           <button
             key={t}
             type="button"
             aria-current={tab === t ? 'page' : undefined}
             onClick={() => setTab(t)}
-            className={`relative flex flex-col items-center gap-1 pt-2.5 pb-2 text-xs ${tab === t ? 'font-semibold text-frame-ink' : ''}`}
+            className={`flex flex-col items-center gap-1 rounded-2xl py-1.5 text-xs ${tab === t ? 'font-semibold text-accent' : ''}`}
           >
-            {tab === t && <span aria-hidden className="absolute top-0 h-1 w-8 rounded-b bg-clip" />}
-            <Icon aria-hidden className={`size-[22px] ${tab === t ? 'text-clip' : ''}`} />
+            <span aria-hidden className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${tab === t ? 'bg-accent/12' : ''}`}>
+              <Icon className="size-5.5" />
+            </span>
             {label}
           </button>
         ))}
@@ -69,7 +71,8 @@ function Shell({ rt }: { rt: Runtime }) {
   );
 }
 
-function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: string }) {
+function History({ rt, tab, base, empty }: { rt: Runtime; tab: number; base: ListFilter; empty: string }) {
+  const { hint } = TABS[tab]!;
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<ClipKind[]>([]);
   const [open, setOpen] = useState<ClipView | null>(null);
@@ -84,8 +87,20 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
   return (
     <>
     {/* The floating button and toast stay outside the spaced list: space-y gives every child but the last a bottom margin, which moved the button when the toast appeared. */}
-    <div className="space-y-3 px-3 pb-24">
-      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} action={<SyncButton account={rt.account} />} />
+    <SearchStrip
+      hero
+      heading={
+        <div className="flex items-center gap-3">
+          <img src={logo} alt="" className="size-12 rounded-2xl shadow-[0_8px_20px_-8px_rgb(0_0_0/0.6)]" />
+          <div>
+            <h1 className="text-xl leading-tight font-bold tracking-tight">Clipply</h1>
+            <p className="text-xs text-white/80">{hint}</p>
+          </div>
+        </div>
+      }
+      query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} action={<SyncButton account={rt.account} />}
+    />
+    <div className="space-y-3 px-3 pt-3 pb-24">
       {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} variant="banner" />}
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} />
     </div>
@@ -93,11 +108,11 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
       {Object.keys(base).length === 0 && (
         <AddClip
           dial
-          className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-20"
+          className="fixed right-4 bottom-[calc(6.25rem+env(safe-area-inset-bottom))] z-20"
           actions={[{ icon: ClipboardPaste, label: 'Save clipboard', onClick: saveClipboard }]}
         />
       )}
-      {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(9rem+env(safe-area-inset-bottom))] rounded-xl bg-frame px-4 py-3 text-center text-sm text-frame-ink shadow-lg">{toast}</p>}
+      {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(10.5rem+env(safe-area-inset-bottom))] rounded-xl bg-frame px-4 py-3 text-center text-sm text-frame-ink shadow-lg">{toast}</p>}
     </>
   );
 }

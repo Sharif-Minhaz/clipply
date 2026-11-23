@@ -36,6 +36,33 @@
   --text-sm--line-height: 1.5;
 }
 
+/*
+ * One hue per clip kind (card accent bar, badge, label, primary button); each >= 4.5:1 on raised.
+ * `static`: cards reach these through `var(--color-kind-${kind})`, which Tailwind cannot see, so always emit them.
+ */
+@theme static {
+  --color-kind-text: #08707c;
+  --color-kind-url: #1d5fd1;
+  --color-kind-code: #15803d;
+  --color-kind-html: #7c3aed;
+  --color-kind-image: #c2410c;
+  --color-kind-file: #475569;
+}
+
+/* Ink-to-teal with a glow in the corner: the phone header, the desktop sidebar and the + button. White text stays >= 4.5:1. */
+@utility bg-hero {
+  background:
+    radial-gradient(90% 70% at 100% 0%, color-mix(in srgb, var(--color-clip) 40%, transparent), transparent 70%),
+    linear-gradient(160deg, var(--color-frame) 0%, var(--color-strip) 100%);
+}
+
+/* The desktop search header: a light teal wash that fades into the page. Opaque, because it sticks over the list. */
+@utility bg-tint {
+  background:
+    radial-gradient(50% 120% at 85% 0%, color-mix(in srgb, var(--color-clip) 18%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-clip) 9%, var(--color-surface)), var(--color-surface));
+}
+
 @layer base {
   :root[data-theme="dark"] {
     --color-surface: #111a1e;
@@ -49,6 +76,12 @@
     --color-frame-hover: #17242a;
     --color-strip: #0b5862;
     --color-strip-hover: #0e6a75;
+    --color-kind-text: #45c8d6;
+    --color-kind-url: #7aa7ff;
+    --color-kind-code: #4ade80;
+    --color-kind-html: #b79cff;
+    --color-kind-image: #fb923c;
+    --color-kind-file: #a3b4c6;
     color-scheme: dark;
   }
 
@@ -65,6 +98,12 @@
       --color-frame-hover: #17242a;
       --color-strip: #0b5862;
       --color-strip-hover: #0e6a75;
+      --color-kind-text: #45c8d6;
+      --color-kind-url: #7aa7ff;
+      --color-kind-code: #4ade80;
+      --color-kind-html: #b79cff;
+      --color-kind-image: #fb923c;
+      --color-kind-file: #a3b4c6;
       color-scheme: dark;
     }
   }

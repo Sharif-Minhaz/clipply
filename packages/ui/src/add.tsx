@@ -116,10 +116,10 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
             title="Add text, image or file"
             disabled={busy}
             onClick={() => setMenu((m) => !m)}
-            className={`relative flex size-14 items-center justify-center ${dial ? 'rounded-full' : 'rounded-2xl'} bg-frame text-clip shadow-lg transition-colors hover:bg-frame-hover disabled:opacity-60`}
+            className={`relative flex size-14 items-center justify-center ${dial ? 'rounded-full' : 'rounded-2xl'} bg-hero text-white shadow-[0_12px_28px_-10px_rgb(8_60_70/0.7)] ring-1 ring-white/10 transition hover:brightness-110 disabled:opacity-60`}
           >
             {busy ? (
-              <span aria-label="Adding" className="size-5 animate-spin rounded-full border-2 border-clip border-t-transparent" />
+              <span aria-label="Adding" className="size-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
             ) : (
               <Plus aria-hidden className={`size-7 transition-transform ${menu ? 'rotate-45' : ''}`} />
             )}

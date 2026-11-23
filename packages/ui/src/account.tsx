@@ -350,9 +350,9 @@ export function SyncButton({ account }: { account: AccountClient }) {
       disabled={syncing}
       title={syncLabel(status)}
       aria-label={syncing ? 'Syncing' : `Sync now. ${syncLabel(status)}`}
-      className="flex size-[46px] shrink-0 items-center justify-center rounded-lg bg-raised text-ink shadow-[0_1px_0_rgb(0_0_0/0.12)] hover:text-accent disabled:opacity-80"
+      className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-raised text-ink shadow-[0_6px_20px_-12px_rgb(8_60_70/0.45)] ring-1 ring-line/70 hover:text-accent disabled:opacity-80 in-data-hero:bg-white/12 in-data-hero:text-white in-data-hero:shadow-none in-data-hero:ring-white/20 in-data-hero:backdrop-blur in-data-hero:hover:bg-white/20"
     >
-      <RefreshCw aria-hidden className={`size-5 ${syncing ? 'animate-spin' : ''} ${status.sync.state === 'error' || status.sync.state === 'offline' ? 'text-danger' : ''}`} />
+      <RefreshCw aria-hidden className={`size-5 ${syncing ? 'animate-spin' : ''} ${status.sync.state === 'error' || status.sync.state === 'offline' ? 'text-danger in-data-hero:text-red-200' : ''}`} />
     </button>
   );
 }

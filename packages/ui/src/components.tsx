@@ -1,5 +1,5 @@
-import { useState, type ComponentType } from 'react';
-import { Check, CheckSquare, Code, Copy, Download, File, Maximize2, Image, Link, Pin, PinOff, Search, Square, Star, Trash, Type, X, type LucideProps } from 'lucide-react';
+import { useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
+import { Check, CheckSquare, Code, Copy, Download, File, Maximize2, Image, Link, Pilcrow, Pin, PinOff, Search, Square, Star, Trash, Type, X, type LucideProps } from 'lucide-react';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -12,13 +12,13 @@ export const KIND_LABEL: Record<ClipKind, string> = {
 };
 
 export const KIND_ICON: Record<ClipKind, ComponentType<LucideProps>> = {
-  text: Type, url: Link, code: Code, html: Type, image: Image, file: File,
+  text: Type, url: Link, code: Code, html: Pilcrow, image: Image, file: File,
 };
 
 export function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v: string) => void; inputRef?: React.Ref<HTMLInputElement> }) {
   return (
-    <label className="flex items-center gap-2.5 rounded-lg bg-raised px-3.5 py-2.5 shadow-[0_1px_0_rgb(0_0_0/0.12)] focus-within:outline-2 focus-within:outline-white">
-      <Search aria-hidden className="size-[18px] shrink-0 text-muted" />
+    <label className="flex items-center gap-2.5 rounded-full bg-raised px-4 py-3 shadow-[0_6px_20px_-12px_rgb(8_60_70/0.45)] ring-1 ring-line/70 focus-within:ring-2 focus-within:ring-accent in-data-hero:bg-white/12 in-data-hero:shadow-none in-data-hero:ring-white/20 in-data-hero:backdrop-blur in-data-hero:focus-within:ring-white/70">
+      <Search aria-hidden className="size-5 shrink-0 text-muted in-data-hero:text-white/80" />
       <input
         ref={inputRef}
         type="search"
@@ -26,18 +26,21 @@ export function SearchBar({ value, onChange, inputRef }: { value: string; onChan
         placeholder="Search your clips"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-transparent text-base text-ink placeholder:text-muted focus:outline-none"
+        className="w-full bg-transparent text-base text-ink placeholder:text-muted focus:outline-none in-data-hero:text-white in-data-hero:placeholder:text-white/75"
       />
     </label>
   );
 }
 
-/** The chips sit on the teal strip, so they are white on teal rather than page colors. */
+/**
+ * Pills on the page; glass pills inside a `data-hero` header. Below `sm` (phones) only the icons show, so the
+ * row stays on one line; the label is still the button's accessible name and tooltip.
+ */
 export function KindFilter({ value, onChange }: { value: readonly ClipKind[]; onChange: (v: ClipKind[]) => void }) {
   const toggle = (kind: ClipKind): void =>
     onChange(value.includes(kind) ? value.filter((k) => k !== kind) : [...value, kind]);
   return (
-    <div role="group" aria-label="Filter by type" className="flex flex-wrap gap-1.5">
+    <div role="group" aria-label="Filter by type" className="grid grid-cols-6 gap-2 sm:flex sm:flex-wrap">
       {(Object.keys(KIND_LABEL) as ClipKind[]).map((kind) => {
         const on = value.includes(kind);
         const Icon = KIND_ICON[kind];
@@ -46,13 +49,16 @@ export function KindFilter({ value, onChange }: { value: readonly ClipKind[]; on
             key={kind}
             type="button"
             aria-pressed={on}
+            title={KIND_LABEL[kind]}
             onClick={() => toggle(kind)}
-            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm transition-colors ${
-              on ? 'bg-white font-semibold text-strip' : 'font-medium text-white hover:bg-strip-hover'
+            className={`flex items-center justify-center gap-1.5 rounded-full px-3.5 py-2 text-sm ring-1 transition-colors ${
+              on
+                ? 'bg-strip font-semibold text-white ring-strip in-data-hero:bg-white in-data-hero:text-strip in-data-hero:ring-white'
+                : 'bg-raised font-medium text-ink ring-line hover:ring-accent/60 in-data-hero:bg-white/10 in-data-hero:text-white in-data-hero:ring-white/15 in-data-hero:hover:bg-white/20'
             }`}
           >
-            <Icon aria-hidden className="size-3.5" />
-            {KIND_LABEL[kind]}
+            <Icon aria-hidden className="size-4.5 sm:size-4" />
+            <span className="max-sm:sr-only">{KIND_LABEL[kind]}</span>
           </button>
         );
       })}
@@ -60,20 +66,37 @@ export function KindFilter({ value, onChange }: { value: readonly ClipKind[]; on
   );
 }
 
-/** The teal clip at the top of the page: search and type filters. Sticks while the list scrolls. */
+/**
+ * Search and type filters at the top of the page; sticks while the list scrolls.
+ * `hero`: the dark gradient header with rounded bottom (phones). Otherwise a light wash (desktop).
+ * `heading` sits above the search and scrolls away; the search and filters stay.
+ */
 export function SearchStrip(props: {
   query: string; onQuery: (v: string) => void; kinds: readonly ClipKind[]; onKinds: (v: ClipKind[]) => void;
   inputRef?: React.Ref<HTMLInputElement>;
   /** Shown beside the search field (the sync button). */
-  action?: React.ReactNode;
+  action?: ReactNode;
+  hero?: boolean;
+  heading?: ReactNode;
 }) {
   return (
-    <div className="sticky top-0 z-10 space-y-2.5 rounded-b-2xl bg-strip px-4 pt-4 pb-3">
-      <div className="flex gap-2">
-        <div className="min-w-0 flex-1"><SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} /></div>
-        {props.action}
+    <div
+      {...(props.hero ? { 'data-hero': '' } : {})}
+      className={`sticky z-10 ${
+        props.hero
+          ? `rounded-b-[2rem] bg-hero px-4 pt-4 pb-5 text-white shadow-[0_14px_30px_-16px_rgb(8_40_48/0.7)] ${props.heading ? '-top-16' : 'top-0'}`
+          : 'top-0 bg-tint px-6 pt-5 pb-4 shadow-[0_12px_16px_-16px_rgb(0_0_0/0.3)]'
+      }`}
+    >
+      <div className="mx-auto max-w-3xl space-y-3">
+        {/* h-12 + the pt-4 above = the 4rem the header sticks above the top (-top-16). */}
+        {props.heading && <div className="flex h-12 items-center">{props.heading}</div>}
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-1"><SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} /></div>
+          {props.action}
+        </div>
+        <KindFilter value={props.kinds} onChange={props.onKinds} />
       </div>
-      <KindFilter value={props.kinds} onChange={props.onKinds} />
     </div>
   );
 }
@@ -123,12 +146,19 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
   return (
     <article
       aria-label={`${KIND_LABEL[meta.kind]} item`}
-      className={`group rounded-xl border bg-raised transition-colors ${selected ? 'border-accent ring-2 ring-accent/30' : 'border-line hover:border-muted/50'}`}
+      style={{ '--kind': `var(--color-kind-${meta.kind})` } as CSSProperties}
+      className={`relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 rounded-2xl bg-raised py-3 pr-3 pl-4 ring-1 transition-shadow ${
+        selected ? 'ring-2 ring-accent' : 'shadow-[0_1px_2px_rgb(0_0_0/0.04),0_10px_24px_-16px_rgb(8_50_60/0.35)] ring-line/60 hover:shadow-[0_1px_2px_rgb(0_0_0/0.05),0_14px_30px_-14px_rgb(8_50_60/0.4)]'
+      }`}
     >
-      <header className="flex items-center gap-2 px-4 pt-3 text-xs text-muted">
+      {/* Inset from the corners rather than a border-left, which bends around the radius. */}
+      <span aria-hidden className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-(--kind)" />
+      <span aria-hidden className="flex size-10 items-center justify-center self-start rounded-xl bg-(--kind)/12 text-(--kind) sm:row-span-3 sm:size-11">
+        <KindIcon className="size-5" />
+      </span>
+      <header className="flex min-w-0 items-center gap-2 text-xs text-muted">
         {onSelect && (selected ? <CheckSquare aria-hidden className="size-4 text-accent" /> : <Square aria-hidden className="size-4" />)}
-        <KindIcon aria-hidden className="size-4" />
-        <span className="font-semibold">{KIND_LABEL[meta.kind]}</span>
+        <span className="text-sm font-semibold text-(--kind)">{KIND_LABEL[meta.kind]}</span>
         {meta.pinned && <Pin aria-label="Pinned" className="size-3.5 fill-accent text-accent" />}
         {meta.favorite && <Star aria-label="Favorite" className="size-3.5 fill-accent text-accent" />}
         {meta.title && <span className="truncate font-semibold text-ink">{meta.title}</span>}
@@ -146,6 +176,7 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
             </>
           )}
         </span>
+        {onOpen && !onSelect && <span className="-my-1"><IconButton icon={Maximize2} label="Expand" onClick={() => onOpen(item)} /></span>}
       </header>
 
       <button
@@ -155,7 +186,7 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
         {...(onSelect ? { 'aria-pressed': !!selected } : {})}
         title={onSelect ? undefined : isFile ? 'Click to save' : 'Click to copy'}
         aria-label={`${onSelect ? 'Select' : isFile ? 'Save' : 'Copy'} ${KIND_LABEL[meta.kind].toLowerCase()} item`}
-        className="block w-full cursor-pointer px-4 py-2 text-left disabled:cursor-default"
+        className="col-span-2 block w-full cursor-pointer rounded-lg py-1 text-left disabled:cursor-default sm:col-span-1 sm:col-start-2"
       >
         {meta.kind === 'image' ? (
           thumb ? (
@@ -165,7 +196,7 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
           )
         ) : meta.kind === 'url' ? (
           <div className="space-y-2">
-            <p className="line-clamp-2 break-words text-[1.0625rem] leading-relaxed text-accent underline decoration-accent/40 underline-offset-2">{item.preview}</p>
+            <p className="line-clamp-2 break-words text-[1.0625rem] leading-relaxed text-(--kind) underline decoration-(--kind)/40 underline-offset-2">{item.preview}</p>
             {(link.imageUrl || link.title) && (
               <div className="overflow-hidden rounded-lg border border-line bg-surface">
                 {link.imageUrl && <img src={link.imageUrl} alt="" loading="lazy" className="max-h-56 w-full object-cover" />}
@@ -180,13 +211,20 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
         )}
       </button>
 
-      {!onSelect && <footer className="flex items-center gap-0.5 px-2 pb-2">
-        <IconButton icon={isFile ? Download : Copy} label={isFile ? 'Save' : 'Copy'} disabled={busy} onClick={act(primary)} />
+      {!onSelect && <footer className="col-span-2 -ml-2 flex items-center gap-0.5 sm:col-span-1 sm:col-start-2">
         {meta.kind === 'image' && <IconButton icon={Download} label="Save" disabled={busy} onClick={act(async () => void (await client.saveFile(item.id)))} />}
         <IconButton icon={Pin} label={meta.pinned ? 'Unpin' : 'Pin'} pressed={meta.pinned} disabled={busy} onClick={act(() => client.setFlags(item.id, { pinned: !meta.pinned }))} />
         <IconButton icon={Star} label={meta.favorite ? 'Unfavorite' : 'Favorite'} pressed={meta.favorite} disabled={busy} onClick={act(() => client.setFlags(item.id, { favorite: !meta.favorite }))} />
         <IconButton icon={Trash} label="Delete" danger disabled={busy} onClick={act(() => client.remove([item.id]))} />
-        {onOpen && <span className="ml-auto"><IconButton icon={Maximize2} label="Expand" onClick={() => onOpen(item)} /></span>}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={act(primary)}
+          className="ml-auto flex items-center gap-1.5 rounded-full bg-(--kind)/12 px-4 py-2 text-sm font-semibold text-(--kind) transition-colors hover:bg-(--kind)/20 disabled:opacity-50"
+        >
+          {isFile ? <Download aria-hidden className="size-4" /> : <Copy aria-hidden className="size-4" />}
+          {isFile ? 'Save' : 'Copy'}
+        </button>
       </footer>}
     </article>
   );
@@ -209,11 +247,11 @@ export function IconButton(props: {
       onClick={props.onClick}
       disabled={props.disabled}
       {...(props.pressed !== undefined ? { 'aria-pressed': props.pressed } : {})}
-      className={`flex size-8 items-center justify-center rounded-md transition-colors hover:bg-surface disabled:opacity-50 ${
+      className={`flex size-9 items-center justify-center rounded-full transition-colors hover:bg-surface disabled:opacity-50 ${
         props.danger ? 'text-muted hover:text-danger' : props.pressed ? 'text-accent' : 'text-muted hover:text-ink'
       }`}
     >
-      <Icon aria-hidden className={`size-4 ${props.pressed ? 'fill-current' : ''}`} />
+      <Icon aria-hidden className={`size-4.5 ${props.pressed ? 'fill-current' : ''}`} />
     </button>
   );
 }
@@ -234,7 +272,7 @@ export function ClipList(props: {
   if (!items) {
     return (
       <div aria-busy="true" className="space-y-2">
-        {[0, 1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-raised" />)}
+        {[0, 1, 2].map((i) => <div key={i} className="h-28 animate-pulse rounded-2xl bg-raised" />)}
       </div>
     );
   }
@@ -268,10 +306,10 @@ export function ClipList(props: {
             <IconButton icon={X} label="Cancel selection" onClick={() => setSelected(null)} />
           </>
         ) : (
-          <button type="button" onClick={() => setSelected(new Set())} className="ml-auto rounded-md px-2.5 py-1 hover:bg-raised hover:text-ink">Select</button>
+          <button type="button" onClick={() => setSelected(new Set())} className="ml-auto rounded-full bg-raised px-3.5 py-1.5 font-medium ring-1 ring-line hover:text-ink">Select</button>
         )}
       </div>
-      <ul className="space-y-2.5">
+      <ul className="space-y-3">
         {items.map((item) => (
           <li key={item.id}>
             <ClipCard
