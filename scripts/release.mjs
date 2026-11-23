@@ -27,12 +27,13 @@ const P = {
   desktopPkg: join(ROOT, 'apps/desktop/package.json'),
   mobilePkg: join(ROOT, 'apps/mobile/package.json'),
   gradle: join(ROOT, 'apps/mobile/android/app/build.gradle'),
+  lock: join(ROOT, 'package-lock.json'),
   keystore: join(ROOT, 'apps/mobile/android/keystore.properties'),
   desktopDist: join(ROOT, 'apps/desktop/dist'),
   apkDir: join(ROOT, 'apps/mobile/android/app/build/outputs/apk/release'),
   out: join(ROOT, 'release'),
 };
-const VERSION_FILES = [P.desktopPkg, P.mobilePkg, P.gradle];
+const VERSION_FILES = [P.desktopPkg, P.mobilePkg, P.gradle, P.lock];
 
 class StepError extends Error {}
 const fail = (msg) => { throw new StepError(msg); };
@@ -81,6 +82,10 @@ function bump(how) {
   gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${code}`).replace(/versionName\s+"[^"]*"/, `versionName "${to}"`);
   writeFileSync(P.gradle, gradle);
   for (const f of [P.desktopPkg, P.mobilePkg]) writeJson(f, { ...readJson(f), version: to });
+  // Keep the workspace entries in package-lock.json in step, so CI's `npm ci` sees a synced lock.
+  const lock = readJson(P.lock);
+  for (const ws of ['apps/desktop', 'apps/mobile']) if (lock.packages?.[ws]) lock.packages[ws].version = to;
+  writeJson(P.lock, lock);
   log(`version ${from} → ${to} (Android versionCode ${oldCode} → ${code})`);
   return to;
 }
