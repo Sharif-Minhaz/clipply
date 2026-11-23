@@ -467,7 +467,7 @@ Each release contains:
 | `latest-linux.yml` | Update metadata for the desktop app |
 | `SHA256SUMS` | SHA-256 checksum of every file above |
 
-Releases are built by [scripts/release.mjs](scripts/release.mjs): versions are bumped (Android `versionCode` always increases, so Android refuses a downgrade), the build refuses to produce an unsigned APK or one pointing at a development server, and files go to a **draft** release that is published only after `SHA256SUMS` is written.
+Releases are built by [scripts/release.mjs](scripts/release.mjs), normally on GitHub Actions ([release workflow](.github/workflows/release.yml), see [docs/release.md](docs/release.md)): versions are bumped (Android `versionCode` always increases, so Android refuses a downgrade), the build refuses to produce an unsigned APK or one pointing at a development server, and files go to a **draft** release that is published only after `SHA256SUMS` is written.
 
 ### Check the checksum
 
@@ -475,6 +475,16 @@ Releases are built by [scripts/release.mjs](scripts/release.mjs): versions are b
 # in the folder with the downloaded files
 sha256sum -c SHA256SUMS --ignore-missing
 ```
+
+### Check where it was built
+
+Releases built on GitHub Actions carry a signed attestation that links each file to the exact commit and workflow run that built it, so the download provably comes from this repository's public source:
+
+```sh
+gh attestation verify Clipply-<version>.apk --repo Sharif-Minhaz/clipply
+```
+
+A release built on the maintainer's machine (the fallback path) has no attestation; rely on the checksum and signing certificate for those.
 
 ### Check the APK signing certificate
 

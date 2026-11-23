@@ -1,0 +1,100 @@
+# Builds and publishes a release on GitHub's runners. Never runs on push: start it with
+# `npm run publish:ci` (or `npm run release:dispatch`), or Actions → Release → Run workflow → pick the
+# v<version> tag. The local path (`npm run publish`) uses the same scripts/release.mjs steps.
+# Setup and both paths: docs/release.md.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the release and upload its files
+  id-token: write # sign the build provenance (Sigstore)
+  attestations: write # store the attestation on GitHub
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 60
+    steps:
+      - name: Require a release tag
+        if: github.ref_type != 'tag' || !startsWith(github.ref_name, 'v')
+        run: |
+          echo "::error::Run this workflow on a v<version> tag, not on ${{ github.ref_type }} ${{ github.ref_name }}"
+          exit 1
+
+      - uses: actions/checkout@v7
+
+      - name: Tag matches version
+        run: |
+          v=$(jq -r .version apps/desktop/package.json)
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME but apps/desktop/package.json is $v"; exit 1; }
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile/android/*.gradle
+            apps/mobile/android/app/*.gradle
+            apps/mobile/android/gradle/wrapper/gradle-wrapper.properties
+
+      - run: npm ci
+
+      - name: Write build config and signing key
+        env:
+          MAIN_VITE_API_URL: ${{ vars.MAIN_VITE_API_URL }}
+          MAIN_VITE_GOOGLE_CLIENT_ID: ${{ vars.MAIN_VITE_GOOGLE_CLIENT_ID }}
+          MAIN_VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.MAIN_VITE_GOOGLE_CLIENT_SECRET }}
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_GOOGLE_WEB_CLIENT_ID: ${{ vars.VITE_GOOGLE_WEB_CLIENT_ID }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for k in MAIN_VITE_API_URL MAIN_VITE_GOOGLE_CLIENT_ID MAIN_VITE_GOOGLE_CLIENT_SECRET VITE_API_URL \
+                   VITE_GOOGLE_WEB_CLIENT_ID ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -n "${!k}" ] || { echo "::error::$k is not set in the release environment (see docs/release.md)"; exit 1; }
+          done
+          printf 'MAIN_VITE_API_URL=%s\nMAIN_VITE_GOOGLE_CLIENT_ID=%s\nMAIN_VITE_GOOGLE_CLIENT_SECRET=%s\n' \
+            "$MAIN_VITE_API_URL" "$MAIN_VITE_GOOGLE_CLIENT_ID" "$MAIN_VITE_GOOGLE_CLIENT_SECRET" > apps/desktop/.env
+          printf 'VITE_API_URL=%s\nVITE_GOOGLE_WEB_CLIENT_ID=%s\n' "$VITE_API_URL" "$VITE_GOOGLE_WEB_CLIENT_ID" > apps/mobile/.env
+          cd apps/mobile/android
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > clipply-release.jks
+          printf 'storeFile=clipply-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD" > keystore.properties
+
+      - name: Build Linux + Android
+        run: node scripts/release.mjs build
+
+      # A wrong key would make every installed app refuse this update. Same digest as in README.md.
+      - name: APK is signed with the release key
+        run: |
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$apksigner" verify --print-certs "release/$GITHUB_REF_NAME"/Clipply-*.apk \
+            | grep -q 'SHA-256 digest: a85db1c3d51077d20c3cc775b2a1942d87def0fa1ad3979e928c8f87e9ba1293' \
+            || { echo "::error::APK is not signed with the Clipply release key"; exit 1; }
+
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            release/${{ github.ref_name }}/*.AppImage
+            release/${{ github.ref_name }}/*.deb
+            release/${{ github.ref_name }}/*.apk
+
+      - name: Publish GitHub release
+        run: node scripts/release.mjs upload
+        env:
+          GH_TOKEN: ${{ github.token }}

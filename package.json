@@ -25,6 +25,8 @@
     "android:live:wifi": "npm run android:live:wifi -w @clipply/mobile",
     "android:logs": "npm run android:logs -w @clipply/mobile",
     "publish": "node scripts/release.mjs all",
+    "publish:ci": "node scripts/release.mjs ci",
+    "release:dispatch": "node scripts/release.mjs dispatch",
     "release:bump": "node scripts/release.mjs bump",
     "release:build": "node scripts/release.mjs build",
     "release:build:linux": "node scripts/release.mjs build linux",

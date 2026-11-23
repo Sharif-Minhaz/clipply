@@ -47,3 +47,6 @@ npx vercel deploy --prebuilt --prod
 ## Cost notes
 
 Cloudinary Free: 25 credits/month (≈ 25 GB storage or transfer combined). Atlas M0: 512 MB storage. Vercel Hobby: function invocations and transfer are capped; desktop polling uses the cheap `/sync/head` probe every 60 s at most.
+
+## 6. Releases
+Building and publishing the desktop and Android apps (GitHub Actions or local): see [release.md](release.md).

@@ -1,12 +1,16 @@
 #!/usr/bin/env node
-// Local release pipeline: bump → build (Linux + Android in parallel) → commit + tag → push → GitHub release.
+// Release pipeline: bump → build (Linux + Android in parallel) → commit + tag → push → GitHub release.
+// Two paths, same steps (docs/release.md): local builds everything here; CI builds on GitHub Actions
+// (.github/workflows/release.yml runs `build` + `upload` there).
 //
-//   npm run publish [-- patch|minor|major|x.y.z]   everything, in order (default: patch)
+//   npm run publish [-- patch|minor|major|x.y.z]      local: everything, in order (default: patch)
+//   npm run publish:ci [-- patch|minor|major|x.y.z]   CI: bump → tag → push → dispatch
 //   npm run release:bump [-- patch|minor|major|x.y.z]
 //   npm run release:build | release:build:linux | release:build:android
 //   npm run release:tag      commit the version files + create tag v<version>
 //   npm run release:push     push branch + tag
 //   npm run release:upload   create/complete the GitHub release from release/v<version>/
+//   npm run release:dispatch start the Release workflow on tag v<version> (token needs Actions: write)
 //
 // Every step after `bump` reads the version from apps/desktop/package.json, so a failed step can be
 // re-run on its own. GitHub token: GH_TOKEN / GITHUB_TOKEN env, or GH_TOKEN=... in .env.release.
@@ -293,6 +297,14 @@ async function upload() {
   // Drafts are invisible to /releases/tags/:tag, so search the list.
   const releases = await api('GET', `/repos/${owner}/${name}/releases?per_page=50`);
   let release = releases.find((r) => r.tag_name === t);
+  if (release && !release.draft) fail(`release ${t} is already published; delete it on GitHub first if you really mean to replace its files`);
+  // A draft from an earlier CI run, or from the other path, holds files of another build: never mix them
+  // (latest-linux.yml carries the AppImage's SHA-512). Local drafts are resumed only locally.
+  if (release && (process.env.GITHUB_ACTIONS || release.author?.type === 'Bot')) {
+    await api('DELETE', `/repos/${owner}/${name}/releases/${release.id}`);
+    log(`deleted draft release ${t} left by an earlier run`);
+    release = undefined;
+  }
   if (!release) {
     release = await api('POST', `/repos/${owner}/${name}/releases`, { body: { tag_name: t, name: `Clipply ${t}`, draft: true, generate_release_notes: true } });
     log(`created draft release ${t}`);
@@ -329,12 +341,21 @@ async function upload() {
   log(`released: ${release.html_url}`);
 }
 
+/** Starts .github/workflows/release.yml on the tag, which builds and uploads on GitHub's runners. */
+async function dispatch() {
+  const t = tagOf(currentVersion());
+  const { owner, name } = repo();
+  if (!git('ls-remote', '--tags', 'origin', `refs/tags/${t}`)) fail(`tag ${t} is not on GitHub yet; run npm run release:push first`);
+  await api('POST', `/repos/${owner}/${name}/actions/workflows/release.yml/dispatches`, { body: { ref: t } });
+  log(`CI release started for ${t}: https://github.com/${owner}/${name}/actions/workflows/release.yml`);
+}
+
 // ── main ────────────────────────────────────────────────────────────────────────────────────────
 
-async function all(how) {
+async function all(how, ci = false) {
   // Check everything that can fail cheaply before touching any file.
   preflightGit();
-  preflightBuild(['linux', 'android']);
+  if (!ci) preflightBuild(['linux', 'android']);
   token();
   repo();
   const committed = JSON.parse(git('show', 'HEAD:apps/desktop/package.json')).version;
@@ -343,10 +364,10 @@ async function all(how) {
   }
   const steps = [
     ['bump', () => bump(how)],
-    ['build', () => build('all')],
+    ...(ci ? [] : [['build', () => build('all')]]),
     ['tag', tag],
     ['push', push],
-    ['upload', upload],
+    ci ? ['dispatch', dispatch] : ['upload', upload],
   ];
   for (const [i, [name, fn]] of steps.entries()) {
     try {
@@ -361,7 +382,7 @@ async function all(how) {
 }
 
 const [step, arg] = process.argv.slice(2);
-const steps = { all: () => all(arg), bump: () => bump(arg), build: () => build(arg), tag, push, upload };
+const steps = { all: () => all(arg), ci: () => all(arg, true), bump: () => bump(arg), build: () => build(arg), tag, push, upload, dispatch };
 try {
   if (!steps[step]) fail(`usage: release.mjs <${Object.keys(steps).join('|')}> [arg]`);
   await steps[step]();
