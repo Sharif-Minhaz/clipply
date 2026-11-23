@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ClipboardPaste, Clipboard, Laptop, Pin, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
+import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinRequestBanner, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -41,6 +41,9 @@ function Shell({ rt }: { rt: Runtime }) {
   return (
     <div className="flex h-dvh flex-col bg-surface pt-[env(safe-area-inset-top)] text-ink">
       <main className="min-h-0 flex-1 overflow-y-auto">
+        {tab !== 'devices' && (
+          <div className="px-4 pt-4 empty:hidden"><JoinRequestBanner account={rt.account} onReview={() => setTab('devices')} /></div>
+        )}
         {tab === 'clipboard' && <History rt={rt} base={{}} empty="Nothing saved yet. Tap + then Save clipboard to save what you copied, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
         {tab === 'favorites' && <History rt={rt} base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
         {tab === 'pinned' && <History rt={rt} base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}

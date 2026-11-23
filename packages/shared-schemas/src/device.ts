@@ -30,6 +30,8 @@ export const Device = RegisterDeviceRequest.extend({
   createdAt: Millis,
   lastSeenAt: Millis,
   lastSyncAt: Millis.optional(),
+  /** A waiting device that scanned the caller's pairing QR: its proof, for the caller only. */
+  pairingProof: Key32.optional(),
 });
 export type Device = z.infer<typeof Device>;
 

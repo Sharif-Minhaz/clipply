@@ -110,7 +110,13 @@ describe('end-to-end key management across simulated devices', () => {
     // A forged envelope pushed straight into the DB (a malicious server) is rejected on refresh.
     const forged = sealKeyringFor(createKeyring(), b.me.deviceId, b.me.keys.box.publicKey, mallory.sign.privateKey);
     await h.store.c.envelopes.updateOne({ _id: b.me.deviceId }, { $set: { sealed: toB64(forged.sealed), signature: toB64(forged.signature), signerDeviceId: a.me.deviceId } });
+    // Replaying history cannot launder it either: a forged step slipped into the history is skipped.
+    await h.store.c.envelopeHistory.insertOne({
+      _id: `${b.me.deviceId}:999`, userId: b.userId, version: 999, createdAt: new Date(), deviceId: b.me.deviceId, epoch: 1,
+      sealed: toB64(forged.sealed), signature: toB64(forged.signature), signerDeviceId: a.me.deviceId,
+    });
     await expect(refreshKeyring(b.api, b.me, b.ring)).rejects.toThrow(VaultProtocolError);
+    await h.store.c.envelopeHistory.deleteOne({ _id: `${b.me.deviceId}:999` });
     // Revoking the victim device rotates and republishes, which also restores B's genuine envelope.
     a.ring = (await revokeAndRotate(a.api, a.me, a.ring, victim.me.deviceId)).ring;
     const rb = await refreshKeyring(b.api, b.me, b.ring);

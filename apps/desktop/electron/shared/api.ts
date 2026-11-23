@@ -109,7 +109,7 @@ export interface DesktopApi {
     signIn(): Promise<{ recoveryKey?: string }>;
     signOut(): Promise<void>;
     syncNow(): Promise<void>;
-    enrollment(): Promise<{ approverName: string; code: string; approved?: boolean } | null>;
+    enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null>;
     acceptEnrollment(): Promise<void>;
     recover(recoveryKey: string): Promise<void>;
     devices(): Promise<DeviceInfo[]>;

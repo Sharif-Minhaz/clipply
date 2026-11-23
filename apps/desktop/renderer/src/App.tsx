@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import logo from './logo.png';
 import { Clipboard, Laptop, Pause, Pin, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, AppVersion, ClipList, ItemViewer, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
+import { AddClip, AppVersion, ClipList, ItemViewer, JoinRequestBanner, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -82,6 +82,9 @@ export function App() {
         </div>
       </nav>
       <main className="min-w-0 flex-1 overflow-y-auto">
+        {tab !== 'devices' && (
+          <div className="px-6 pt-4 empty:hidden"><JoinRequestBanner account={window.clipply.account} onReview={() => setTab('devices')} /></div>
+        )}
         {tab === 'clipboard' && <HistoryScreen base={{}} empty="Nothing copied yet. Copy something anywhere and it lands here." />}
         {tab === 'favorites' && <HistoryScreen base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
         {tab === 'pinned' && <HistoryScreen base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}

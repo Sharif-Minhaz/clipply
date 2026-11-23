@@ -22,7 +22,8 @@ export type DeviceDoc = Omit<Device, 'id' | 'createdAt' | 'lastSeenAt' | 'lastSy
   lastSeenAt: Date;
   lastSyncAt?: Date;
   /** Pending device claimed by an authorized device that will enroll it. */
-  enrollment?: { approverId: string; at: Date };
+  /** `proof`: the pairing-QR proof (from the approver, or from this device when it scanned). Kept after approval so the new device can still read it. */
+  enrollment?: { approverId: string; at: Date; proof?: string };
   /** Set on revoke; the TTL index purges the tombstone after REVOKED_DEVICE_TTL_SECONDS. */
   revokedAt?: Date;
 };
@@ -31,6 +32,12 @@ export type DeviceDoc = Omit<Device, 'id' | 'createdAt' | 'lastSeenAt' | 'lastSy
 export const REVOKED_DEVICE_TTL_SECONDS = 30 * 86_400;
 
 export type EnvelopeDoc = KeyEnvelope & { _id: string; userId: string; updatedAt: Date };
+
+/** Every envelope ever published to a device, keyed `${deviceId}:${version}`, so a device that missed several roster changes can replay them. */
+export type EnvelopeHistoryDoc = KeyEnvelope & { _id: string; userId: string; version: number; createdAt: Date };
+
+/** A device away longer than this (and through more than one roster change) re-joins instead of replaying. */
+export const ENVELOPE_HISTORY_TTL_SECONDS = 365 * 86_400;
 
 export interface SessionDoc {
   _id: string;
@@ -88,6 +95,7 @@ export interface Collections {
   objects: Collection<ObjectDoc>;
   rateLimits: Collection<RateDoc>;
   envelopes: Collection<EnvelopeDoc>;
+  envelopeHistory: Collection<EnvelopeHistoryDoc>;
 }
 
 export interface Store {
@@ -107,6 +115,7 @@ export function createStore(client: MongoClient, db: Db): Store {
     objects: db.collection('encrypted_objects'),
     rateLimits: db.collection('rate_limits'),
     envelopes: db.collection('device_key_envelopes'),
+    envelopeHistory: db.collection('device_key_envelope_history'),
   };
   return {
     client,
@@ -144,5 +153,7 @@ export async function ensureIndexes(c: Collections): Promise<void> {
     c.objects.createIndex({ status: 1, updatedAt: 1 }),
     c.rateLimits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     c.envelopes.createIndex({ userId: 1 }),
+    c.envelopeHistory.createIndex({ deviceId: 1, version: 1 }),
+    c.envelopeHistory.createIndex({ createdAt: 1 }, { expireAfterSeconds: ENVELOPE_HISTORY_TTL_SECONDS }),
   ]);
 }

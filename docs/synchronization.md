@@ -66,7 +66,7 @@ GET  /v1/storage/download-url?itemId          → short-lived signed private dow
 
 ## 8. Implementation notes
 
-- **Payload choice**: text-like bodies travel inline when the ciphertext fits (≤ ~48 KB); larger bodies and **all images** go to Cloudinary, so the encrypted thumbnail can ride inline. Blobs are fetched lazily on first preview, authenticated, then cached as ciphertext.
+- **Payload choice**: text-like bodies travel inline when the ciphertext fits (≤ ~48 KB); larger bodies and **all images** go to Cloudinary, so the encrypted thumbnail can ride inline. After a sync that pulled changes, the bodies of the images among the 15 newest items (at most 5) are downloaded in the background (so copying a recent image never waits on the network); older images and other blobs are fetched on first use, with a "Copying…" spinner on the card. Either way they are authenticated, then cached as ciphertext.
 - **Conflict outcomes** (`ClipLibrary.resolveConflict`): same content hash → server version kept with our flags/title re-applied (`merged`); different content → server version kept under the id and our edit saved as a new item titled "Edited copy" (`forked`); server tombstone → local item removed (`deleted`).
 - **Pending local edits are never overwritten by a pull**; their push conflicts and is resolved as above.
 - **Desktop scheduling** (`AccountController.startScheduler`): `/vault/state` + `/sync/head` probe every 60 s (5 min after 30 min idle), sync 2 s after local changes and on window focus. Android does not use the scheduler (WorkManager, Phase 6).

@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import type { AccountStatus, DeviceInfo } from '@clipply/sync-engine';
 
-import { DevicesPanel, type AccountClient } from './account';
+import { DevicesPanel, JoinRequestBanner, type AccountClient } from './account';
 
 afterEach(cleanup);
 
@@ -37,7 +37,7 @@ function fake(initial: Partial<AccountStatus>, devices: DeviceInfo[] = []) {
     setSyncPaused: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
   };
-  return client;
+  return Object.assign(client, { set });
 }
 
 const dev = (p: Partial<DeviceInfo>): DeviceInfo => ({ id: 'd', name: 'Phone', platform: 'android', status: 'authorized', lastSeenAt: Date.now(), isThisDevice: false, ...p });
@@ -52,6 +52,20 @@ describe('DevicesPanel', () => {
     expect(await screen.findByText('Laptop')).toBeTruthy();
     expect(screen.queryByText('Old phone')).toBeNull();
     expect(screen.queryByText('Removed')).toBeNull();
+  });
+
+  it('clears another account\'s leftovers only after confirmation, then signs in', async () => {
+    const user = userEvent.setup();
+    const client = fake({});
+    const ok = client.signIn as ReturnType<typeof vi.fn>;
+    ok.mockRejectedValueOnce(new Error('POST /v1/auth/google → 409: device_id_taken'));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<DevicesPanel account={client} />);
+    await user.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+    await waitFor(() => expect(ok).toHaveBeenCalledTimes(2));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(client.signOut).toHaveBeenCalledOnce();
+    confirm.mockRestore();
   });
 
   it('signs in and will not dismiss the recovery key until its last group is typed', async () => {
@@ -98,5 +112,25 @@ describe('DevicesPanel', () => {
   it('explains when sync is not configured', async () => {
     render(<DevicesPanel account={fake({ configured: false })} />);
     expect(await screen.findByText(/Sync is not configured/)).toBeTruthy();
+  });
+});
+
+describe('JoinRequestBanner', () => {
+  it('asks a connected device to review a waiting one and disappears once it is handled', async () => {
+    const user = userEvent.setup();
+    const client = fake({ signedIn: true, vault: 'ready', deviceStatus: 'authorized', joinRequests: [{ id: 'p', name: 'Pixel 8' }] });
+    const onReview = vi.fn();
+    render(<JoinRequestBanner account={client} onReview={onReview} />);
+    expect(await screen.findByText('Pixel 8')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Review' }));
+    expect(onReview).toHaveBeenCalledOnce();
+    client.set({ joinRequests: [] });
+    await waitFor(() => expect(screen.queryByText('Pixel 8')).toBeNull());
+  });
+
+  it('stays hidden on a device that is not connected yet', async () => {
+    render(<JoinRequestBanner account={fake({ signedIn: true, vault: 'needs_enrollment', joinRequests: [{ id: 'p', name: 'Pixel 8' }] })} onReview={() => {}} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText('Pixel 8')).toBeNull();
   });
 });

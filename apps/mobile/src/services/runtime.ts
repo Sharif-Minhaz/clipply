@@ -338,7 +338,11 @@ export async function boot(): Promise<Runtime> {
     status: async () => account.getStatus(),
     onStatus: (cb) => account.onStatus(cb),
     signIn: () => account.signIn(),
-    signOut: () => account.signOut(),
+    signOut: async () => {
+      await account.signOut();
+      // Forget the Google account Credential Manager remembered, so the next sign-in shows the picker.
+      await SocialLogin.logout({ provider: 'google' }).catch((error: unknown) => log.debug('google logout failed', { error }));
+    },
     syncNow: () => account.sync(),
     enrollment: () => account.enrollment(),
     acceptEnrollment: () => account.acceptEnrollment(),

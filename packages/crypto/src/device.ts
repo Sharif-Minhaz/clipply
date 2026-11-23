@@ -72,6 +72,39 @@ export function openKeyringEnvelope(
  * Short authentication string shown on both devices during enrollment (12 digits, ~40 bits).
  * Any key substituted by the server changes it. Order: new device first, approving device second.
  */
+type PublicKeys = { boxPublicKey: Uint8Array; signPublicKey: Uint8Array };
+
+/** One-time secret printed in a pairing QR code; it travels only optically, never via the server. */
+export function pairingSecret(): Uint8Array {
+  return sodium().randombytes_buf(16);
+}
+
+/** Fingerprint of the QR-showing device's keys, so the scanner can check the keys the server hands it. */
+export function pairingFingerprint(keys: PublicKeys): Uint8Array {
+  return sodium().crypto_generichash(32, concat(utf8('clipply/v1/pair-fp/'), keys.boxPublicKey, keys.signPublicKey), null);
+}
+
+/**
+ * Proof that the scanner read the QR (it knows the secret), binding both devices' ids and keys. The
+ * showing device recomputes it from its secret to authenticate the scanner's keys.
+ */
+export function pairingProof(secret: Uint8Array, scanner: PublicKeys & { id: string }, shower: PublicKeys & { id: string }): Uint8Array {
+  return sodium().crypto_generichash(
+    32,
+    concat(utf8(`clipply/v1/pair/${scanner.id}/${shower.id}/`), scanner.boxPublicKey, scanner.signPublicKey, shower.boxPublicKey, shower.signPublicKey),
+    secret,
+  );
+}
+
+export function verifyPairingProof(secret: Uint8Array, scanner: PublicKeys & { id: string }, shower: PublicKeys & { id: string }, proof: Uint8Array): boolean {
+  return proof.length === 32 && sodium().memcmp(pairingProof(secret, scanner, shower), proof);
+}
+
+/** Constant-time comparison of a QR fingerprint against keys. */
+export function matchesFingerprint(keys: PublicKeys, fingerprint: Uint8Array): boolean {
+  return fingerprint.length === 32 && sodium().memcmp(pairingFingerprint(keys), fingerprint);
+}
+
 export function enrollmentCode(
   newDevice: { boxPublicKey: Uint8Array; signPublicKey: Uint8Array },
   approver: { boxPublicKey: Uint8Array; signPublicKey: Uint8Array },

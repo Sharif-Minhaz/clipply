@@ -13,7 +13,8 @@ export interface AccountClient {
   signOut(): Promise<void>;
   syncNow(): Promise<void>;
   /** `approved`: the server already authorized this device; only the codes are left to compare. */
-  enrollment(): Promise<{ approverName: string; code: string; approved?: boolean } | null>;
+  /** `rejoin`: this device was connected but missed too many device-list changes to verify the new key itself. */
+  enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null>;
   acceptEnrollment(): Promise<void>;
   recover(recoveryKey: string): Promise<void>;
   devices(): Promise<DeviceInfo[]>;
@@ -90,7 +91,7 @@ function RecoveryKeyNotice({ recoveryKey, replaced, onDone }: { recoveryKey: str
 }
 
 function Enrollment({ account }: { account: AccountClient }) {
-  const [pending, setPending] = useState<{ approverName: string; code: string; approved?: boolean } | null>(null);
+  const [pending, setPending] = useState<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null>(null);
   const [mode, setMode] = useState<'device' | 'recovery'>('device');
   const [key, setKey] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -142,7 +143,9 @@ function Enrollment({ account }: { account: AccountClient }) {
         pending ? (
           <div className="space-y-3">
             <p className="text-sm text-muted">
-              {pending.approved
+              {pending.rejoin
+                ? <>Your device list changed while this device was offline, and it can no longer check the new encryption key by itself. On {pending.approverName}, open Devices and tap Show code next to this device. Check that it shows the same code:</>
+                : pending.approved
                 ? <>{pending.approverName} approved this device, but setup did not finish. On {pending.approverName}, open Devices and tap Show code next to this device. Check that it shows the same code:</>
                 : <>{pending.approverName} is approving this device. Check that it shows the same code:</>}
             </p>
@@ -153,7 +156,7 @@ function Enrollment({ account }: { account: AccountClient }) {
             </Button>
           </div>
         ) : (
-          <p className="text-sm text-muted">On a device that is already connected, open Devices and tap Approve next to this one. Waiting for it…</p>
+          <p className="text-sm text-muted">Open Clipply on a device that is already connected: it will ask you to approve this one (or open Devices there and tap Approve). Waiting for it…</p>
         )
       ) : (
         <div className="space-y-2">
@@ -291,6 +294,27 @@ export function SyncButton({ account }: { account: AccountClient }) {
   );
 }
 
+/** Signing out wipes this device, so say what is lost before doing it. */
+function confirmSignOut(pending: number): boolean {
+  const unsynced = pending > 0 ? ` ${pending} change${pending === 1 ? " hasn't" : "s haven't"} synced yet and will be lost.` : '';
+  return window.confirm(`Sign out? This deletes the clipboard history and keys on this device. Clips already synced stay in your account.${unsynced}`);
+}
+
+/** Shown on every screen of a connected device while another device waits for its approval. */
+export function JoinRequestBanner({ account, onReview }: { account: AccountClient; onReview: () => void }) {
+  const status = useAccountStatus(account);
+  const requests = status?.vault === 'ready' ? (status.joinRequests ?? []) : [];
+  if (requests.length === 0) return null;
+  const who = requests.length === 1 ? requests[0]!.name : `${requests.length} devices`;
+  return (
+    <div role="status" className="flex items-center gap-3 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-ink">
+      <ShieldCheck aria-hidden className="size-5 shrink-0 text-accent" />
+      <span className="min-w-0 flex-1"><span className="font-semibold">{who}</span> {requests.length === 1 ? 'wants' : 'want'} to join your account.</span>
+      <Button tone="primary" onClick={onReview}>Review</Button>
+    </div>
+  );
+}
+
 /** Account + devices screen shared by desktop and Android. */
 export function DevicesPanel({ account }: { account: AccountClient }) {
   const status = useAccountStatus(account);
@@ -305,7 +329,9 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
     if (!status?.signedIn) return;
     account.devices().then(setDevices, (e: unknown) => setError(message(e)));
   }, [account, status?.signedIn]);
-  useEffect(loadDevices, [loadDevices, status?.vault]);
+  // Reload when a device starts or stops waiting, so it appears here without reopening the screen.
+  const requestIds = status?.joinRequests?.map((d) => d.id).join() ?? '';
+  useEffect(loadDevices, [loadDevices, status?.vault, requestIds]);
 
   if (!status) return <div aria-busy="true" className="h-24 animate-pulse rounded-xl bg-raised" />;
   if (!status.configured) {
@@ -315,7 +341,19 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
   const signIn = (): void => {
     setBusy(true);
     setError(null);
-    account.signIn().then((r) => r.recoveryKey && setRecoveryKey({ key: r.recoveryKey, replaced: false }), (e: unknown) => setError(message(e))).finally(() => setBusy(false));
+    const attempt = async (): Promise<void> => {
+      try {
+        const r = await account.signIn();
+        if (r.recoveryKey) setRecoveryKey({ key: r.recoveryKey, replaced: false });
+      } catch (e) {
+        // This device still belongs to another account (signed out by an older version, which kept its history).
+        if (!message(e).endsWith('device_id_taken')) throw e;
+        if (!window.confirm('This device still has clipboard history and keys from the account used here before. Signing in with a different account deletes them from this device; clips already synced stay in that account. Continue?')) return;
+        await account.signOut();
+        await attempt();
+      }
+    };
+    attempt().catch((e: unknown) => setError(message(e))).finally(() => setBusy(false));
   };
 
   return (
@@ -346,13 +384,13 @@ export function DevicesPanel({ account }: { account: AccountClient }) {
                 {paused ? <><Play aria-hidden className="size-4" /> Resume sync</> : <><Pause aria-hidden className="size-4" /> Pause sync</>}
               </Button>
             )}
-            <Button onClick={() => void account.signOut()}><LogOut aria-hidden className="size-4" /> Sign out</Button>
+            <Button onClick={() => confirmSignOut(status.sync.pending) && void account.signOut().catch((e: unknown) => setError(message(e)))}><LogOut aria-hidden className="size-4" /> Sign out</Button>
           </div>
         </Card>
       )}
       {status.signedIn && status.vault === 'needs_enrollment' && <Enrollment account={account} />}
       {status.vault === 'removed' && (
-        <Card><p className="text-sm text-danger">This device was removed from your account. Local history stays here; to reconnect it, sign out and sign in again, then approve it from a connected device.</p></Card>
+        <Card><p className="text-sm text-danger">This device was removed from your account. To reconnect it, sign out (this clears the history on this device) and sign in again, then approve it from a connected device.</p></Card>
       )}
       {status.signedIn && devices && (
         <Card>

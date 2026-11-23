@@ -61,7 +61,7 @@ Envelope signature: Ed25519 over `"clipply/v1/envelope/" + deviceId + "/" + epoc
 **Create vault (first device).** The device's local keyring becomes the account vault, so local history stays readable as-is. Roster = this device; a recovery key is generated, its public keys go into the keyring, and the device uploads its own signed envelope plus the keyring sealed to the recovery public key (`POST /vault/init`, once per account). The recovery key is shown once.
 
 **Enroll a device (code comparison).**
-1. New device N signs in → `pending`; it can reach no vault data.
+1. New device N signs in → `pending`; it can reach no vault data. Connected devices see it in `GET /vault/state` (`pendingDevices`, polled every minute and on window focus or app resume) and ask the user to review it: a banner on every screen, plus a system notification on desktop.
 2. Authorized device T claims N (`POST /vault/claim/:id`); N learns T's public keys (`GET /vault/enrollment`).
 3. Both show a 12-digit code from `BLAKE2b("clipply/v1/sas/" ‖ pkN_box ‖ pkN_sign ‖ pkT_box ‖ pkT_sign)`. The user confirms the match **on both devices**; any substituted key changes the code.
 4. T adds N to the roster, seals the keyring to every roster member and to the recovery key (so a later recovery starts from the current roster), signs, publishes with `authorize: N`. The server authorizes N only if T is authorized and is the device that claimed it.
@@ -75,6 +75,8 @@ Envelope signature: Ed25519 over `"clipply/v1/envelope/" + deviceId + "/" + epoc
 **Replace the recovery key.** Any authorized device can replace a lost or exposed recovery key: a rotation (epoch e+1) whose keyring carries the new recovery public keys, `knownBy = [this device]`. The server swaps the stored recovery key only as part of a rotation, so the old key's sealed copy never covers new data, and from then on rejects recovery proofs signed by the old key.
 
 **Refresh.** When `/vault/state` shows a new version, a device fetches its envelope and accepts it only if (a) it is signed by a device in its current roster or by the recovery key, (b) the keyring contains every key it already holds, byte-identical. If it is no longer in the roster, it treats itself as removed.
+
+**Catching up after several roster changes.** A device that was away while the roster changed more than once can find the latest envelope signed by a device it has never seen (e.g. a reinstalled phone recovered with the recovery key, then removed its old entry). The server keeps every envelope published to each device (`device_key_envelope_history`, one per vault version, 365-day TTL, deleted on revoke). The device replays its own envelopes after the version it last processed (`GET /vault/envelope-history?since=`), accepting each step only if it is signed by a member of the roster trusted so far or by that roster's recovery key, and only if it keeps every key; then it checks the latest envelope against the result. A step the server forged or reordered fails those checks and is skipped, so trust is exactly as strict as a single refresh. Only if the latest envelope still cannot be verified (history expired) does the device join again with codes or the recovery key; the UI then says the device fell behind rather than that it was never set up.
 
 ## 6. Backups (export / import)
 
@@ -99,6 +101,6 @@ Not protected against (known limitations):
 - A compromised unlocked device (malware with the user's privileges).
 - **Metadata**: account identity, device names/platforms, item counts, padded sizes, timing, IPs.
 - **Rollback/withholding**: the server can withhold changes or replay an old item revision.
-- **Revoked device colluding with the server, against a device that has not yet refreshed**: until a device has processed the rotation, the revoked device's key is still in its roster, so a forged keyring signed by the revoked device would pass its checks. Devices refresh on every sync, which keeps the window small; closing it fully needs an ordered, signed revocation log.
+- **Revoked device colluding with the server, against a device that has not yet refreshed**: until a device has processed the rotation, the revoked device's key is still in its roster, so a forged keyring signed by the revoked device would pass its checks. Devices refresh on every sync, which keeps the window small for devices in use; for a device that was away it lasts until it catches up (replaying history does not widen it: the same stale roster would accept a forged latest envelope today). Closing it fully needs revocations that every member countersigns.
 - Android keeps keys in WebView memory while the app is open.
 - **A malicious authorized device** can revoke others or replace the recovery key. Devices accept such changes because the device is in their roster; the UI shows the device list but does not yet alert on a recovery-key change.

@@ -2,8 +2,8 @@ import { createPublicKey, verify } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  InitVaultRequest, PublishEnvelopesRequest, RecoverRequest,
-  type EnrollmentResponse, type EnvelopeResponse, type RecoverResponse, type VaultStateResponse,
+  ClaimDeviceRequest, ENVELOPE_HISTORY_PAGE, InitVaultRequest, MAX_PENDING_SHOWN, PairDeviceRequest, PublishEnvelopesRequest, RecoverRequest,
+  type EnrollmentResponse, type EnvelopeHistoryResponse, type EnvelopeResponse, type RecoverResponse, type VaultStateResponse,
 } from '@clipply/shared-schemas';
 
 import type { Store } from '../../db';
@@ -39,7 +39,13 @@ export function vaultRoutes(store: Store, now: () => number): Router {
 
   r.get('/state', async (req, res) => {
     const u = await user(requireAuth(req).userId);
-    const out: VaultStateResponse = { initialized: !!u.vault, epoch: u.keyEpoch, version: u.vault?.version ?? 0 };
+    const pending = await store.c.devices
+      .find({ userId: u._id, status: 'pending' }, { projection: { name: 1 }, sort: { createdAt: 1 }, limit: MAX_PENDING_SHOWN })
+      .toArray();
+    const out: VaultStateResponse = {
+      initialized: !!u.vault, epoch: u.keyEpoch, version: u.vault?.version ?? 0,
+      pendingDevices: pending.map((d) => ({ id: d._id, name: d.name })),
+    };
     res.json(out);
   });
 
@@ -58,11 +64,9 @@ export function vaultRoutes(store: Store, now: () => number): Router {
         { session },
       );
       if (claimed.modifiedCount !== 1) throw new HttpError(409, 'vault_exists');
-      await store.c.envelopes.replaceOne(
-        { _id: a.deviceId },
-        { ...body.envelope, userId: a.userId, updatedAt: new Date(now()) },
-        { upsert: true, session },
-      );
+      const t = new Date(now());
+      await store.c.envelopes.replaceOne({ _id: a.deviceId }, { ...body.envelope, userId: a.userId, updatedAt: t }, { upsert: true, session });
+      await store.c.envelopeHistory.insertOne({ ...body.envelope, _id: `${a.deviceId}:1`, userId: a.userId, version: 1, createdAt: t }, { session });
     });
     res.status(204).end();
   });
@@ -79,24 +83,59 @@ export function vaultRoutes(store: Store, now: () => number): Router {
     res.json(out);
   });
 
-  /** An authorized device claims a pending one; both then show the enrollment code. */
+  r.get('/envelope-history', async (req, res) => {
+    const a = requireAuth(req);
+    const since = parse(z.coerce.number().int().nonnegative(), req.query.since);
+    const docs = await store.c.envelopeHistory
+      .find({ deviceId: a.deviceId, userId: a.userId, version: { $gt: since } })
+      .sort({ version: 1 })
+      .limit(ENVELOPE_HISTORY_PAGE)
+      .toArray();
+    const out: EnvelopeHistoryResponse = {
+      envelopes: docs.map(({ deviceId, epoch, sealed, signerDeviceId, signature, version }) => ({ version, envelope: { deviceId, epoch, sealed, signerDeviceId, signature } })),
+    };
+    res.json(out);
+  });
+
+  /**
+   * An authorized device claims a pending one; both then show the enrollment code, or, with `proof`
+   * (the claimer scanned the pending device's pairing QR), the pending device verifies the proof instead.
+   */
   r.post('/claim/:deviceId', async (req, res) => {
     const a = requireAuth(req);
     if (a.device.status !== 'authorized') throw new HttpError(403, 'device_not_authorized');
     const id = parse(z.uuid(), req.params.deviceId);
+    const { proof } = parse(ClaimDeviceRequest, req.body ?? {});
     const updated = await store.c.devices.updateOne(
       { _id: id, userId: a.userId, status: 'pending' },
-      { $set: { enrollment: { approverId: a.deviceId, at: new Date(now()) } } },
+      { $set: { enrollment: { approverId: a.deviceId, at: new Date(now()), ...(proof ? { proof } : {}) } } },
     );
     if (updated.matchedCount !== 1) throw new HttpError(404, 'pending_device_not_found');
     res.status(204).end();
   });
 
+  /**
+   * A pending device scanned an authorized device's pairing QR: it names that device as its approver
+   * and leaves the proof for it. Only the approver (who holds the QR secret) can make use of it.
+   */
+  r.post('/pair', async (req, res) => {
+    const a = requireAuth(req);
+    if (a.device.status !== 'pending') throw new HttpError(409, 'device_not_pending');
+    const { approverId, proof } = parse(PairDeviceRequest, req.body);
+    const approver = await store.c.devices.findOne({ _id: approverId, userId: a.userId, status: 'authorized' });
+    if (!approver) throw new HttpError(404, 'approver_not_found');
+    await store.c.devices.updateOne({ _id: a.deviceId, status: 'pending' }, { $set: { enrollment: { approverId, at: new Date(now()), proof } } });
+    res.status(204).end();
+  });
+
   r.get('/enrollment', async (req, res) => {
     const a = requireAuth(req);
-    const approverId = a.device.enrollment?.approverId;
-    const approver = approverId ? await store.c.devices.findOne({ _id: approverId, userId: a.userId, status: 'authorized' }) : null;
-    const out: EnrollmentResponse = { approver: approver ? { id: approver._id, name: approver.name, keys: approver.keys } : null };
+    const e = a.device.enrollment;
+    const approver = e ? await store.c.devices.findOne({ _id: e.approverId, userId: a.userId, status: 'authorized' }) : null;
+    const out: EnrollmentResponse = {
+      approver: approver ? { id: approver._id, name: approver.name, keys: approver.keys } : null,
+      ...(approver && e?.proof ? { proof: e.proof } : {}),
+    };
     res.json(out);
   });
 
@@ -143,11 +182,17 @@ export function vaultRoutes(store: Store, now: () => number): Router {
       }
 
       const t = new Date(now());
+      const version = u.vault.version + 1;
       for (const e of body.envelopes) {
         await store.c.envelopes.replaceOne({ _id: e.deviceId }, { ...e, userId: a.userId, updatedAt: t }, { upsert: true, session });
       }
+      await store.c.envelopeHistory.insertMany(
+        body.envelopes.map((e) => ({ ...e, _id: `${e.deviceId}:${version}`, userId: a.userId, version, createdAt: t })),
+        { session },
+      );
       if (body.authorize) {
-        await store.c.devices.updateOne({ _id: body.authorize }, { $set: { status: 'authorized' }, $unset: { enrollment: '' } }, { session });
+        // `enrollment` stays: a device paired by QR may only read the approver's proof after this.
+        await store.c.devices.updateOne({ _id: body.authorize }, { $set: { status: 'authorized' } }, { session });
       }
       await store.c.users.updateOne(
         { _id: a.userId },

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import {
-  AuthResponse, Device, DeviceList, DownloadUrlResponse, EnrollmentResponse, EnvelopeResponse, PullResponse, PushResponse,
+  AuthResponse, Device, DeviceList, DownloadUrlResponse, EnrollmentResponse, EnvelopeHistoryResponse, EnvelopeResponse, PullResponse, PushResponse,
   RecoverResponse, ServerItem, SyncHead, UploadSignatureResponse, VaultStateResponse,
-  type ConfirmUploadRequest, type GoogleSignInRequest, type InitVaultRequest, type PublishEnvelopesRequest, type PushRequest,
+  type ClaimDeviceRequest, type ConfirmUploadRequest, type GoogleSignInRequest, type InitVaultRequest, type PairDeviceRequest, type PublishEnvelopesRequest, type PushRequest,
   type RecoverRequest, type RefreshRequest, type UploadSignatureRequest,
 } from '@clipply/shared-schemas';
 
@@ -125,7 +125,9 @@ export function createApiClient(options: ApiClientOptions) {
     vaultState: () => request('GET', '/v1/vault/state', VaultStateResponse),
     initVault: (body: InitVaultRequest) => request('POST', '/v1/vault/init', NoContent, body),
     envelope: () => request('GET', '/v1/vault/envelope', EnvelopeResponse),
-    claimDevice: (id: string) => request('POST', `/v1/vault/claim/${encodeURIComponent(id)}`, NoContent),
+    envelopeHistory: (since: number) => request('GET', `/v1/vault/envelope-history?since=${since}`, EnvelopeHistoryResponse),
+    claimDevice: (id: string, body: ClaimDeviceRequest = {}) => request('POST', `/v1/vault/claim/${encodeURIComponent(id)}`, NoContent, body),
+    pairDevice: (body: PairDeviceRequest) => request('POST', '/v1/vault/pair', NoContent, body),
     enrollment: () => request('GET', '/v1/vault/enrollment', EnrollmentResponse),
     publishEnvelopes: (body: PublishEnvelopesRequest) => request('POST', '/v1/vault/envelopes', NoContent, body),
     recover: (body: RecoverRequest) => request('POST', '/v1/vault/recover', RecoverResponse, body),

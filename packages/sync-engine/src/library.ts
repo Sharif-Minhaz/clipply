@@ -134,6 +134,8 @@ export class ClipLibrary {
   private readonly index = new Map<string, Entry>();
   private readonly corrupt = new Set<string>();
   private readonly listeners = new Set<() => void>();
+  /** In-flight blob downloads, so a copy during a background prefetch joins it instead of downloading twice. */
+  private readonly bodyFetches = new Map<string, Promise<ItemRow>>();
   private readonly tx: Transactor;
   private readonly now: () => number;
 
@@ -245,17 +247,30 @@ export class ClipLibrary {
 
   /** Full plaintext body, decrypted on demand. Callers must not persist it. */
   async readBody(id: string): Promise<Uint8Array> {
-    let row = await this.requireRow(id);
-    if (!row.body && row.blobKey && this.deps.fetchBlob) {
-      const ciphertext = await this.deps.fetchBlob(id);
-      // Authenticate before caching: a tampered download fails here and is never stored.
-      openPart(this.openRow(row).dek, id, 'body', ciphertext);
-      const fresh = await itemRepo(this.deps.db).get(id);
-      if (fresh && !fresh.deleted && fresh.blobKey === row.blobKey) await itemRepo(this.deps.db).put({ ...fresh, body: ciphertext });
-      row = { ...row, body: ciphertext };
-    }
+    const row = await this.cacheBody(id);
     if (!row.body) throw new ItemNotFoundError(`body of ${id} is not stored locally`);
     return openPart(this.openRow(row).dek, id, 'body', row.body);
+  }
+
+  /** Downloads a blob body into the local cache if it is not there yet; returns the row. */
+  async cacheBody(id: string): Promise<ItemRow> {
+    const row = await this.requireRow(id);
+    if (row.body || !row.blobKey || !this.deps.fetchBlob) return row;
+    let pending = this.bodyFetches.get(id);
+    if (!pending) {
+      pending = this.downloadBody(row).finally(() => this.bodyFetches.delete(id));
+      this.bodyFetches.set(id, pending);
+    }
+    return pending;
+  }
+
+  private async downloadBody(row: ItemRow): Promise<ItemRow> {
+    const ciphertext = await this.deps.fetchBlob!(row.id);
+    // Authenticate before caching: a tampered download fails here and is never stored.
+    openPart(this.openRow(row).dek, row.id, 'body', ciphertext);
+    const fresh = await itemRepo(this.deps.db).get(row.id);
+    if (fresh && !fresh.deleted && fresh.blobKey === row.blobKey) await itemRepo(this.deps.db).put({ ...fresh, body: ciphertext });
+    return { ...row, body: ciphertext };
   }
 
   async readThumb(id: string): Promise<Uint8Array | null> {
@@ -315,6 +330,17 @@ export class ClipLibrary {
       this.index.delete(id);
       this.corrupt.delete(id);
     }
+    this.emit();
+  }
+
+  /** Deletes all history and queued changes on this device only; nothing is sent (leaving an account). */
+  async forgetAll(): Promise<void> {
+    await this.tx.transaction(async (db) => {
+      await outboxRepo(db).deleteAll();
+      await itemRepo(db).deleteAll();
+    });
+    this.index.clear();
+    this.corrupt.clear();
     this.emit();
   }
 

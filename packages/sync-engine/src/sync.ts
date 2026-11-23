@@ -37,8 +37,11 @@ export interface SyncReport {
   failed: number;
 }
 
-const CURSOR = 'sync.cursor';
+export const SYNC_CURSOR = 'sync.cursor';
 const MAX_BACKOFF_MS = 30 * 60_000;
+/** Images among the newest PREFETCH_WINDOW items (at most PREFETCH_IMAGES) keep their body on the device ahead of use. */
+const PREFETCH_WINDOW = 15;
+const PREFETCH_IMAGES = 5;
 
 
 /** Exponential backoff with jitter: 5 s, 10 s, 20 s … capped at 30 min. */
@@ -56,6 +59,8 @@ const errorText = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.
  */
 export class SyncEngine {
   private running: Promise<SyncReport> | null = null;
+  /** Background downloads of the newest image bodies, chained so passes never overlap. */
+  private prefetching: Promise<void> = Promise.resolve();
   private readonly now: () => number;
 
   constructor(private readonly d: SyncDeps) {
@@ -73,10 +78,25 @@ export class SyncEngine {
   /** Cheap check for idle clients: only syncs when the server has news or the outbox has work. */
   async syncIfNeeded(): Promise<SyncReport | null> {
     const head = await this.d.api.syncHead();
-    const cursor = (await kvRepo(this.d.db).get<number>(CURSOR)) ?? 0;
+    const cursor = (await kvRepo(this.d.db).get<number>(SYNC_CURSOR)) ?? 0;
     const pending = await outboxRepo(this.d.db).pendingCount();
     if (head.seq <= cursor && pending === 0) return null;
     return this.sync();
+  }
+
+  /**
+   * Downloads, in the background, the bodies of up to 5 images among the 15 newest items so copying
+   * them does not wait on the network; older ones are fetched on demand. Cached bodies cost no request.
+   */
+  prefetchImages(): Promise<void> {
+    this.prefetching = this.prefetching.then(async () => {
+      const recent = this.d.library.list({ limit: PREFETCH_WINDOW }).filter((v) => v.meta.kind === 'image');
+      for (const v of recent.slice(0, PREFETCH_IMAGES)) {
+        // A failure is not retried here: Copy/preview still downloads on demand.
+        await this.d.library.cacheBody(v.id).catch((error: unknown) => this.d.log.warn('image prefetch failed', { itemId: v.id, error }));
+      }
+    });
+    return this.prefetching;
   }
 
   /** Fetches a blob body's ciphertext for ClipLibrary.readBody. */
@@ -92,6 +112,7 @@ export class SyncEngine {
     // Ops created by pulls (duplicate cleanup) go out in the same run.
     if ((await outboxRepo(this.d.db).due(this.now(), 1)).length > 0) await this.push(report);
     this.d.log.info('sync finished', { ...report });
+    if (report.pulled > 0) void this.prefetchImages();
     return report;
   }
 
@@ -190,7 +211,7 @@ export class SyncEngine {
 
   private async pull(report: SyncReport): Promise<void> {
     const kv = kvRepo(this.d.db);
-    let cursor = (await kv.get<number>(CURSOR)) ?? 0;
+    let cursor = (await kv.get<number>(SYNC_CURSOR)) ?? 0;
     let seen: Set<string> | null = null;
     for (;;) {
       let page;
@@ -202,7 +223,7 @@ export class SyncEngine {
           this.d.log.warn('cursor expired, full resync', {});
           cursor = 0;
           seen = new Set();
-          await kv.set(CURSOR, 0);
+          await kv.set(SYNC_CURSOR, 0);
           continue;
         }
         throw error;
@@ -219,7 +240,7 @@ export class SyncEngine {
         if (res === 'applied') report.pulled++;
       }
       cursor = page.cursor;
-      await kv.set(CURSOR, cursor);
+      await kv.set(SYNC_CURSOR, cursor);
       if (!page.hasMore) {
         if (seen) await this.d.library.dropMissingSynced(seen);
         return;

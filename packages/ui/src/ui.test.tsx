@@ -155,6 +155,19 @@ describe('shared UI', () => {
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: lib.list()[0]!.id }));
   });
 
+  it('shows Copying… while a copy is still downloading', async () => {
+    const user = userEvent.setup();
+    let finish!: () => void;
+    const copy = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    render(<ClipplyProvider client={lib.client(copy)}><ClipList filter={{}} /></ClipplyProvider>);
+    const [first] = await screen.findAllByRole('article');
+    await user.click(within(first!).getByRole('button', { name: /^Copy .* item$/ }));
+    expect(await within(first!).findByText('Copying…')).toBeTruthy();
+    finish();
+    expect(await within(first!).findByText('Copied')).toBeTruthy();
+    expect(within(first!).queryByText('Copying…')).toBeNull();
+  });
+
   it('opens an item, edits its text and closes on Escape', async () => {
     const user = userEvent.setup();
     const client = lib.client();

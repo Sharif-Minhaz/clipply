@@ -26,7 +26,9 @@ const uploadBlob: BlobUploader = async (_url, fields, ciphertext) => {
   cloud.set(fields.public_id!, ciphertext.slice());
   return { public_id: fields.public_id!, version: 1, bytes: ciphertext.length, signature: signParams({ public_id: fields.public_id!, version: 1 }, 'cloud-secret') };
 };
+let downloads = 0;
 const downloadBlob = async (url: string): Promise<Uint8Array> => {
+  downloads++;
   const blob = cloud.get(new URL(url).searchParams.get('public_id')!);
   if (!blob) throw new Error('404');
   return blob;
@@ -115,19 +117,48 @@ describe('two-device synchronization', () => {
     expect(await view(a)).toEqual(await view(b));
   });
 
-  it('syncs images as encrypted blobs with inline encrypted thumbnails, fetched lazily', async () => {
+  it('syncs images as encrypted blobs with inline encrypted thumbnails, prefetched in the background', async () => {
     const png = Uint8Array.from({ length: 70_000 }, (_, i) => i % 251);
     const { id } = (await b.lib.capture({ type: 'image', mime: 'image/png', data: png, thumb: utf8('thumb-bytes'), pixels: png }))!;
+    const before = downloads;
     await syncBoth(a, b);
+    await a.engine.prefetchImages();
     const blobRow = await itemRepo(a.db).get(id);
-    expect(blobRow).toMatchObject({ body: null });
+    expect(blobRow!.body).not.toBeNull();
     expect(blobRow!.blobKey).toMatch(/^clipply\//);
     expect(a.lib.get(id)?.hasThumb).toBe(true);
     expect(fromUtf8((await a.lib.readThumb(id))!)).toBe('thumb-bytes');
+    // Copy reads the cached body: no download at copy time.
     expect(await a.lib.readBody(id)).toEqual(png);
+    expect(downloads - before).toBe(1);
     // Cloudinary only ever saw ciphertext.
     for (const blob of cloud.values()) expect(Buffer.from(blob).includes(Buffer.from(png.subarray(0, 64)))).toBe(false);
     await a.lib.remove([id]);
+    await syncBoth(a, b);
+  });
+
+  it('prefetches at most 5 images, only from the 15 newest items; older ones download on demand', async () => {
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 2)); // distinct createdAt keeps the order exact
+    const images: string[] = [];
+    const texts: string[] = [];
+    for (let n = 0; n < 7; n++) {
+      const png = Uint8Array.from({ length: 1_000 }, (_, i) => (i + n) % 251);
+      images.push((await b.lib.capture({ type: 'image', mime: 'image/png', data: png, thumb: utf8(`t${n}`), pixels: png }))!.id);
+      await tick();
+    }
+    for (let n = 0; n < 9; n++) {
+      texts.push((await b.lib.capture({ type: 'text', text: `window filler ${n}` }))!.id);
+      await tick();
+    }
+    await syncBoth(a, b);
+    await a.engine.prefetchImages();
+    // Newest 15 = 9 texts + images[1..6]; the cap keeps images[2..6]. images[0] is outside the window.
+    const cached = await Promise.all(images.map(async (id) => (await itemRepo(a.db).get(id))!.body !== null));
+    expect(cached).toEqual([false, false, true, true, true, true, true]);
+    const before = downloads;
+    await a.lib.readBody(images[0]!);
+    expect(downloads - before).toBe(1);
+    await a.lib.remove([...images, ...texts]);
     await syncBoth(a, b);
   });
 

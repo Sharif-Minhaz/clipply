@@ -1,11 +1,11 @@
 import { createApiClient, ApiError, type ApiClient } from '@clipply/api-client';
-import { rosterEntry, toB64, type Keyring } from '@clipply/crypto';
+import { createKeyring, rosterEntry, toB64, type Keyring } from '@clipply/crypto';
 import { kvRepo, outboxRepo, type SqlDb } from '@clipply/database';
 import type { Logger } from '@clipply/logger';
 import type { DevicePlatform } from '@clipply/shared-schemas';
 
 import type { ClipLibrary } from './library';
-import { SyncEngine, type BlobDownloader, type BlobUploader } from './sync';
+import { SYNC_CURSOR, SyncEngine, type BlobDownloader, type BlobUploader } from './sync';
 import {
   acceptEnrollment, approveDevice, createAccountVault, enrollmentCodeFor, recoverVault, refreshKeyring, replaceRecoveryKey, revokeAndRotate, UntrustedEnvelopeError,
   type DeviceIdentity, type DevicePublicKeys, type RefreshResult,
@@ -29,6 +29,8 @@ export interface AccountStatus {
   deviceStatus?: 'authorized' | 'pending' | 'revoked';
   vault: VaultStatus;
   sync: { state: SyncState; lastSyncAt?: number; error?: string; pending: number };
+  /** Devices waiting for this (connected) device to approve them; refreshed on every sync and probe. */
+  joinRequests?: Array<{ id: string; name: string }>;
 }
 
 export interface DeviceInfo {
@@ -177,12 +179,27 @@ export class AccountController {
     return this.refreshState();
   }
 
-  /** Keeps local history; stops syncing and forgets the session. */
+  /**
+   * Leaves the account on this device: ends the session, deletes this device's history and keys and
+   * starts a new device identity. Local only: synced clips stay in the account, and nothing carries
+   * over to the next account signed in here. The old device entry stays in the account until removed
+   * from another device (a self-revoke here could not rotate the vault key, leaving a stale roster).
+   */
   async signOut(): Promise<void> {
     this.stopScheduler();
     if (this.session) await this.api.logout({ refreshToken: this.session.refreshToken }).catch(() => undefined);
     this.session = null;
     await this.d.saveSession(null);
+    await this.d.library.forgetAll();
+    const kv = kvRepo(this.d.db);
+    await kv.set(SYNC_CURSOR, 0);
+    await kv.set(VAULT_VERSION, 0);
+    await this.d.setKeyring(createKeyring());
+    if (this.d.newIdentity) {
+      this.identity = await this.d.newIdentity();
+      this.d.library.setDeviceId(this.identity.deviceId);
+    }
+    this.shownApprover = null;
     this.status = { configured: this.status.configured, signedIn: false, vault: 'none', sync: { state: 'off', pending: 0 } };
     this.emit();
   }
@@ -223,14 +240,15 @@ export class AccountController {
   /** Picks up a new envelope (roster change or rotation) when the vault version moved. */
   private async refreshVault(force = false): Promise<void> {
     const state = await this.api.vaultState();
+    this.showJoinRequests(state.pendingDevices);
     const known = (await kvRepo(this.d.db).get<number>(VAULT_VERSION)) ?? 0;
     if (!force && state.version === known) return;
     let res: RefreshResult;
     try {
-      res = await refreshKeyring(this.api, this.identity, this.d.getKeyring());
+      res = await refreshKeyring(this.api, this.identity, this.d.getKeyring(), known);
     } catch (error) {
       if (!(error instanceof UntrustedEnvelopeError)) throw error;
-      // Nothing local can vouch for the new signer: join again (codes match or recovery key).
+      // Not even the replayed history vouches for the new signer: join again (codes match or recovery key).
       this.update({ vault: 'needs_enrollment', sync: { ...this.status.sync, state: 'off' } });
       return;
     }
@@ -246,15 +264,17 @@ export class AccountController {
   // ── enrollment: new-device side ────────────────────────────────────────────────────────
 
   /** Pending device: who claimed us and the code to compare, or null while nobody has. */
-  async enrollment(): Promise<{ approverName: string; code: string; approved?: boolean } | null> {
+  async enrollment(): Promise<{ approverName: string; code: string; approved?: boolean; rejoin?: boolean } | null> {
     if (this.status.deviceStatus === 'authorized') {
-      // Already approved, but the keyring was never accepted here. Its envelope's signer is the
-      // device to compare codes with (it shows them under "Show code").
+      // Already approved, but this device has no keyring it can verify the latest envelope with: either
+      // it was never accepted here, or (`rejoin`) it was a member that fell too far behind. The
+      // envelope's signer is the device to compare codes with (it shows them under "Show code").
       if (!this.shownApprover) {
         const { signer } = await this.api.envelope();
         this.shownApprover = { ...signer, code: enrollmentCodeFor(this.publicKeys(), signer.keys) };
       }
-      return { approverName: this.shownApprover.name, code: this.shownApprover.code, approved: true };
+      const rejoin = !!rosterEntry(this.d.getKeyring(), this.identity.deviceId);
+      return { approverName: this.shownApprover.name, code: this.shownApprover.code, approved: true, ...(rejoin ? { rejoin } : {}) };
     }
     const { approver } = await this.api.enrollment();
     if (!approver) return this.shownApprover ? { approverName: this.shownApprover.name, code: this.shownApprover.code } : null;
@@ -326,7 +346,9 @@ export class AccountController {
     const pending = (await this.api.listDevices()).devices.find((x) => x.id === deviceId && x.status === 'pending');
     if (!pending) throw new Error('device is not waiting for approval');
     await this.d.setKeyring(await approveDevice(this.api, this.identity, this.d.getKeyring(), { id: deviceId, keys: pending.keys }));
-    await kvRepo(this.d.db).set(VAULT_VERSION, (await this.api.vaultState()).version);
+    const state = await this.api.vaultState();
+    await kvRepo(this.d.db).set(VAULT_VERSION, state.version);
+    this.showJoinRequests(state.pendingDevices);
     this.emit();
   }
 
@@ -346,7 +368,10 @@ export class AccountController {
 
   private async adoptRotation(ring: Keyring): Promise<void> {
     await this.d.setKeyring(ring);
-    await kvRepo(this.d.db).set(VAULT_VERSION, (await this.api.vaultState()).version);
+    const state = await this.api.vaultState();
+    await kvRepo(this.d.db).set(VAULT_VERSION, state.version);
+    // Removing a device that was still waiting clears its request.
+    this.showJoinRequests(state.pendingDevices);
     this.emit();
   }
 
@@ -398,6 +423,7 @@ export class AccountController {
     if (!this.canSync()) return;
     try {
       const state = await this.api.vaultState();
+      this.showJoinRequests(state.pendingDevices);
       const known = (await kvRepo(this.d.db).get<number>(VAULT_VERSION)) ?? 0;
       if (state.version !== known) return void (await this.sync());
       if (await this.engine.syncIfNeeded()) {
@@ -406,6 +432,13 @@ export class AccountController {
     } catch (error) {
       this.syncFailed(error);
     }
+  }
+
+  /** Only a connected device can approve others; emits only when the list changed. */
+  private showJoinRequests(pending: Array<{ id: string; name: string }>): void {
+    const next = this.status.deviceStatus === 'authorized' ? pending.filter((d) => d.id !== this.identity.deviceId) : [];
+    if (JSON.stringify(next) === JSON.stringify(this.status.joinRequests ?? [])) return;
+    this.update({ joinRequests: next });
   }
 
   private canSync(): boolean {

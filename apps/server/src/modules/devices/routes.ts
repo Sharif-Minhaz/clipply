@@ -13,9 +13,12 @@ export function deviceRoutes(store: Store, now: () => number): Router {
   const r = Router();
 
   r.get('/', async (req, res) => {
-    const { userId } = requireAuth(req);
+    const { userId, deviceId } = requireAuth(req);
     const docs = await store.c.devices.find({ userId }).sort({ createdAt: 1 }).toArray();
-    res.json({ devices: docs.map(toDevice) });
+    // A waiting device that scanned this caller's pairing QR left its proof for the caller.
+    const proofFor = (d: (typeof docs)[number]) =>
+      d.status === 'pending' && d.enrollment?.approverId === deviceId && d.enrollment.proof ? { pairingProof: d.enrollment.proof } : {};
+    res.json({ devices: docs.map((d) => ({ ...toDevice(d), ...proofFor(d) })) });
   });
 
   r.patch('/:id', async (req, res) => {
@@ -45,6 +48,7 @@ export function deviceRoutes(store: Store, now: () => number): Router {
     if (!updated) throw new HttpError(404, 'device_not_found');
     await store.c.sessions.updateMany({ deviceId: id }, { $set: { revoked: true } });
     await store.c.envelopes.deleteOne({ _id: id, userId: a.userId });
+    await store.c.envelopeHistory.deleteMany({ deviceId: id, userId: a.userId });
     res.json(toDevice(updated));
   });
 

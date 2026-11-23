@@ -149,6 +149,11 @@ export function itemRepo(db: SqlDb) {
       );
     },
 
+    /** Deletes every row, tombstones included (local only: nothing is queued for sync). */
+    async deleteAll(): Promise<void> {
+      await db.run('DELETE FROM items');
+    },
+
     /** Removes tombstones nobody needs any more (never synced, or delete acknowledged). */
     async purge(id: string): Promise<void> {
       await db.run('DELETE FROM items WHERE id = ? AND deleted = 1', [id]);

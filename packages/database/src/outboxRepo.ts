@@ -81,6 +81,10 @@ export function outboxRepo(db: SqlDb) {
       await db.run('DELETE FROM outbox WHERE item_id = ?', [itemId]);
     },
 
+    async deleteAll(): Promise<void> {
+      await db.run('DELETE FROM outbox');
+    },
+
     async pendingCount(): Promise<number> {
       const [row] = await db.query<{ n: number }>('SELECT COUNT(*) AS n FROM outbox');
       return row?.n ?? 0;

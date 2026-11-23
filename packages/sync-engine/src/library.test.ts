@@ -147,6 +147,19 @@ describe('ClipLibrary', () => {
     expect(fresh.corruptCount).toBe(1);
   });
 
+  it('downloads a remote body once when a copy races a background prefetch', async () => {
+    const { id } = (await lib.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(9, 8, 7) }))!;
+    const row = await itemRepo(db).get(id);
+    await itemRepo(db).put({ ...row!, body: null, blobKey: 'k', blobSize: row!.body!.length });
+    let fetches = 0;
+    const remote = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, fetchBlob: async () => (fetches++, row!.body!) });
+    await remote.load();
+    const [, body] = await Promise.all([remote.cacheBody(id), remote.readBody(id)]);
+    expect(body).toEqual(Uint8Array.of(9, 8, 7));
+    expect(fetches).toBe(1);
+    expect((await itemRepo(db).get(id))!.body).toEqual(row!.body);
+  });
+
   it('re-keys local history into another vault without touching bodies', async () => {
     const { id } = (await lib.capture({ type: 'text', text: 'joins the account' }))!;
     await lib.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(1, 2, 3) });

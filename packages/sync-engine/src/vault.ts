@@ -5,7 +5,7 @@ import {
   type DeviceKeyPairs, type Keyring, type RosterEntry, type SealedEnvelope,
 } from '@clipply/crypto';
 import type { ApiClient } from '@clipply/api-client';
-import type { KeyEnvelope, RecoveryEnvelope } from '@clipply/shared-schemas';
+import { ENVELOPE_HISTORY_PAGE, type KeyEnvelope, type RecoveryEnvelope } from '@clipply/shared-schemas';
 
 export interface DeviceIdentity {
   deviceId: string;
@@ -20,14 +20,14 @@ export interface DevicePublicKeys {
 
 export type VaultApi = Pick<
   ApiClient,
-  'vaultState' | 'initVault' | 'envelope' | 'claimDevice' | 'enrollment' | 'publishEnvelopes' | 'recover' | 'revokeDevice'
+  'vaultState' | 'initVault' | 'envelope' | 'envelopeHistory' | 'claimDevice' | 'enrollment' | 'publishEnvelopes' | 'recover' | 'revokeDevice'
 >;
 
 export class VaultProtocolError extends Error {
   override name = 'VaultProtocolError';
 }
 
-/** The latest envelope's signer is unknown here: the roster changed more than one step while this device was away. */
+/** The latest envelope's signer is unknown here, even after replaying the envelope history this device missed. */
 export class UntrustedEnvelopeError extends VaultProtocolError {}
 
 const entryOf = (id: string, keys: DevicePublicKeys): RosterEntry => ({
@@ -157,26 +157,52 @@ export async function replaceRecoveryKey(api: VaultApi, me: DeviceIdentity, ring
   return { ring: next, recoveryKey: recoveryKey! };
 }
 
-export type RefreshResult = { status: 'unchanged' | 'updated'; ring: Keyring } | { status: 'removed'; ring: Keyring };
+/** Opens an envelope signed by a roster member of `ring` or by its recovery key; null if neither signed it. */
+function openTrusted(envelope: KeyEnvelope, me: DeviceIdentity, ring: Keyring): Keyring | null {
+  const candidates = [rosterEntry(ring, envelope.signerDeviceId)?.signPublicKey, ring.recovery?.signPublicKey].filter(
+    (k): k is Uint8Array => k !== undefined,
+  );
+  for (const key of candidates) {
+    try {
+      return openKeyringEnvelope(fromWire(envelope), me.deviceId, me.keys.box, key);
+    } catch (error) {
+      if (!(error instanceof CryptoError)) throw error;
+    }
+  }
+  return null;
+}
+
+export type RefreshResult ={ status: 'unchanged' | 'updated'; ring: Keyring } | { status: 'removed'; ring: Keyring };
 
 /**
  * Picks up a re-published envelope (new roster or rotated epoch). Accepted only if signed by a
  * device in our current roster or by the recovery key we hold, and if it keeps every key we have.
+ * `since` is the vault version this device last processed; missed steps are replayed from there.
  */
-export async function refreshKeyring(api: VaultApi, me: DeviceIdentity, ring: Keyring): Promise<RefreshResult> {
+export async function refreshKeyring(api: VaultApi, me: DeviceIdentity, ring: Keyring, since = 0): Promise<RefreshResult> {
   const { envelope } = await api.envelope();
-  const sealed = fromWire(envelope);
-  const candidates = [rosterEntry(ring, envelope.signerDeviceId)?.signPublicKey, ring.recovery?.signPublicKey].filter(
-    (k): k is Uint8Array => k !== undefined,
-  );
-  let next: Keyring | null = null;
-  for (const key of candidates) {
-    try {
-      next = openKeyringEnvelope(sealed, me.deviceId, me.keys.box, key);
-      break;
-    } catch (error) {
-      if (!(error instanceof CryptoError)) throw error;
+  let next = openTrusted(envelope, me, ring);
+  if (!next) {
+    // Missed more than one roster change: replay this device's envelopes since `since`, each accepted
+    // only if the roster trusted so far vouches for its signer, then check the latest against that.
+    let trusted = ring;
+    for (let from = since; ;) {
+      let page;
+      try {
+        page = (await api.envelopeHistory(from)).envelopes;
+      } catch (error) {
+        // A server without the history endpoint yet: fall through to re-joining, as before.
+        if ((error as { status?: number }).status === 404) break;
+        throw error;
+      }
+      for (const h of page) {
+        const step = openTrusted(h.envelope, me, trusted);
+        if (step && extendsKeyring(step, trusted)) trusted = step;
+      }
+      if (page.length < ENVELOPE_HISTORY_PAGE) break;
+      from = page.at(-1)!.version;
     }
+    next = openTrusted(envelope, me, trusted);
   }
   if (!next) throw new UntrustedEnvelopeError('envelope is not signed by a trusted device');
   if (!extendsKeyring(next, ring)) throw new VaultProtocolError('envelope drops keys this device already has');

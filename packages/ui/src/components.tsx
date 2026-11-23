@@ -95,12 +95,19 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
   const thumb = useThumbUrl(item.id, item.hasThumb);
   const link = useLinkPreview(item.id, meta.kind === 'url');
   const [busy, setBusy] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
   const isFile = meta.kind === 'file';
   // Files cannot go on the clipboard, so their primary action is Save.
   const primary = async (): Promise<void> => {
     if (isFile) return void (await client.saveFile(item.id));
-    await client.copy(item.id);
+    // An older synced image may still have to be downloaded first.
+    setCopying(true);
+    try {
+      await client.copy(item.id);
+    } finally {
+      setCopying(false);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
@@ -126,7 +133,11 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
         {meta.favorite && <Star aria-label="Favorite" className="size-3.5 fill-accent text-accent" />}
         {meta.title && <span className="truncate font-semibold text-ink">{meta.title}</span>}
         <span className="ml-auto whitespace-nowrap">
-          {copied ? (
+          {copying ? (
+            <span role="status" className="flex items-center gap-1 font-semibold text-accent">
+              <span aria-hidden className="size-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> Copying…
+            </span>
+          ) : copied ? (
             <span role="status" className="flex items-center gap-1 font-semibold text-accent"><Check aria-hidden className="size-4" /> Copied</span>
           ) : (
             <>

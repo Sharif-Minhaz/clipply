@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { app, dialog, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, nativeImage, safeStorage, shell } from 'electron';
+import { app, dialog, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, nativeImage, Notification, safeStorage, shell } from 'electron';
 import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { generateDeviceKeys, initCrypto } from '@clipply/crypto';
@@ -302,6 +302,17 @@ async function main(): Promise<void> {
     account?.notifyLocalChange();
   });
   account?.onStatus(() => send(CH.accountChanged));
+  // A device asking to join: tell the user once per device, even while the window is hidden in the tray.
+  const notifiedJoins = new Set<string>();
+  account?.onStatus(() => {
+    for (const d of account?.getStatus().joinRequests ?? []) {
+      if (notifiedJoins.has(d.id) || !Notification.isSupported()) continue;
+      notifiedJoins.add(d.id);
+      const n = new Notification({ title: 'Approve new device?', body: `${d.name} wants to join your Clipply account. Open Clipply to review it.`, icon });
+      n.on('click', () => win && showWindow(win));
+      n.show();
+    }
+  });
 
   // An AppImage update lands under a new versioned file name: point autostart and the shortcut at this file.
   if (process.env.APPIMAGE) {
