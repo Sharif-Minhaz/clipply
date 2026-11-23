@@ -93,7 +93,7 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
             <>
               <div aria-hidden className={`fixed inset-0 ${dial ? 'bg-black/40' : ''}`} onMouseDown={() => setMenu(false)} />
               {dial ? (
-                <div role="menu" aria-label="Add to Clipply" className="absolute right-1 bottom-full mb-4 flex flex-col items-end gap-4">
+                <div role="menu" aria-label="Add to Clipply" className="absolute right-1 bottom-full mb-4 flex w-max flex-col items-end gap-4">
                   {items.map((a) => <DialAction key={a.label} {...a} />)}
                 </div>
               ) : (
@@ -146,7 +146,7 @@ function MenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<LucidePr
 function DialAction({ icon: Icon, label, onClick }: AddAction) {
   return (
     <button type="button" role="menuitem" onClick={onClick} className="flex items-center gap-3">
-      <span className="rounded-md bg-frame px-2.5 py-1 text-sm font-medium text-frame-ink shadow-md">{label}</span>
+      <span className="rounded-md bg-frame px-2.5 py-1 text-sm font-medium whitespace-nowrap text-frame-ink shadow-md">{label}</span>
       <span aria-hidden className="flex size-12 items-center justify-center rounded-full bg-raised text-ink shadow-lg">
         <Icon className="size-5" />
       </span>

@@ -249,6 +249,16 @@ export async function boot(): Promise<Runtime> {
     state: () => updateChecker.state(),
     check: () => updateChecker.check({ force: true }),
     openReleasePage: async () => void window.open((await updateChecker.state()).url, '_system'),
+    install: async (onProgress) => {
+      const { available, latest } = await updateChecker.state();
+      if (!available || !latest) throw new Error('Clipply is up to date');
+      const progress = await ClipplyNative.addListener('updateProgress', (e) => onProgress?.(e.percent));
+      try {
+        await ClipplyNative.installUpdate({ version: latest });
+      } finally {
+        await progress.remove();
+      }
+    },
     onChange: (cb) => {
       updateListeners.add(cb);
       return () => updateListeners.delete(cb);

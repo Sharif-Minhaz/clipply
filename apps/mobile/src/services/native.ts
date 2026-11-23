@@ -40,7 +40,11 @@ export interface ClipplyNativePlugin {
   uploadBlob(o: { url: string; fields: Record<string, string>; data: string }): Promise<{ json: string }>;
   downloadBlob(o: { url: string }): Promise<{ data: string }>;
   deviceName(): Promise<{ name: string }>;
+  /** Downloads that release's APK and opens the system installer; rejects (after opening the setting) until installs from Clipply are allowed. */
+  installUpdate(o: { version: string }): Promise<void>;
   addListener(event: 'windowFocus' | 'inbox', cb: () => void): Promise<PluginListenerHandle>;
+  /** Download percentage (0–100) while `installUpdate` runs. */
+  addListener(event: 'updateProgress', cb: (e: { percent: number }) => void): Promise<PluginListenerHandle>;
 }
 
 export const ClipplyNative = registerPlugin<ClipplyNativePlugin>('ClipplyNative');

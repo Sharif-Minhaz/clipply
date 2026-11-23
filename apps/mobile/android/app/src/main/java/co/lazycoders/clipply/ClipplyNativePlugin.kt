@@ -5,7 +5,9 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.result.ActivityResult
+import androidx.core.content.FileProvider
 import android.os.Build
 import android.provider.Settings
 import android.util.Base64
@@ -20,6 +22,7 @@ import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -209,6 +212,56 @@ class ClipplyNativePlugin : Plugin() {
         if (result.resultCode != Activity.RESULT_OK || uri == null) return@guard call.resolve(JSObject().put("data", null))
         val bytes = context.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
         call.resolve(JSObject().put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)))
+    }
+
+    // ── app update: the APK of a GitHub release, handed to the system installer ─────────────
+
+    /**
+     * Downloads Clipply-<version>.apk from this project's release and opens the system installer
+     * (one tap to confirm). Android itself refuses it unless it is signed with the installed app's key.
+     */
+    @PluginMethod
+    fun installUpdate(call: PluginCall) = guard(call) {
+        val version = call.getString("version")!!
+        require(Regex("[0-9]{1,6}[.][0-9]{1,6}[.][0-9]{1,6}").matches(version)) { "not a release version: $version" }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+            activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
+            return@guard call.reject("Allow Clipply to install apps, then tap Update again.")
+        }
+        val apk = File(context.cacheDir, "update.apk")
+        val c = URL("https://github.com/Sharif-Minhaz/clipply/releases/download/v$version/Clipply-$version.apk").openConnection() as HttpURLConnection
+        c.connectTimeout = 15_000
+        c.readTimeout = 120_000
+        if (c.responseCode !in 200..299) throw java.io.IOException("download failed (${c.responseCode})")
+        val total = c.contentLengthLong
+        var done = 0L
+        var reported = -1
+        c.inputStream.use { input ->
+            apk.outputStream().use { out ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    done += n
+                    val percent = if (total > 0) (done * 100 / total).toInt() else -1
+                    if (percent > reported) {
+                        reported = percent
+                        notifyListeners("updateProgress", JSObject().put("percent", percent))
+                    }
+                }
+            }
+        }
+        val info = context.packageManager.getPackageArchiveInfo(apk.path, 0)
+        if (info?.packageName != context.packageName || info.versionName != version) {
+            apk.delete()
+            throw java.io.IOException("the download is not Clipply $version")
+        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
+        activity.startActivity(
+            Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+        )
+        call.resolve()
     }
 
     @PluginMethod

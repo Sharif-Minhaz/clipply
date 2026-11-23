@@ -53,7 +53,7 @@ Installing an app from outside the Play Store means trusting the developer inste
 - **Encrypted on your device, decrypted only on your devices.** Content is encrypted with keys that are created on your device and are never sent to the server in readable form. The server, the database (MongoDB Atlas), the file storage (Cloudinary) and the host (Vercel) only ever receive ciphertext.
 - **Google sign-in identifies your account and nothing more.** Your Google account is not used to derive or unlock any key. If someone took over the Clipply server or your Google login, they still could not decrypt your history.
 - **New devices need your approval.** A device you add only gets your keys after you compare a 12-digit code on both screens. The server cannot add a device on its own.
-- **No analytics, no ads, no crash reporting, no third-party SDKs that phone home.** The app talks to your Clipply API, Google (only for sign-in), Cloudinary (only to upload/download encrypted image and file blobs) and, at most once a day, GitHub (only to ask whether a newer version exists — [details](#in-app-update-check)). Link previews, if you leave them on, fetch the linked page's preview image.
+- **No analytics, no ads, no crash reporting, no third-party SDKs that phone home.** The app talks to your Clipply API, Google (only for sign-in), Cloudinary (only to upload/download encrypted image and file blobs) and, at most once a day, GitHub (to ask whether a newer version exists, and to download it when you tap Update — [details](#in-app-update-check)). Link previews, if you leave them on, fetch the linked page's preview image.
 - **Works without an account.** Sync is optional. Without signing in, your history stays on the device, still encrypted at rest.
 - **Open source.** Everything in this README can be checked in the code; file paths are given throughout.
 - **Signed releases with checksums.** Every release ships a `SHA256SUMS` file, and the Android APK is always signed with the same key, so Android itself refuses any "update" signed by someone else ([details](#update-channel-and-verifying-downloads)).
@@ -362,17 +362,23 @@ apksigner verify --print-certs Clipply-<version>.apk
 
 ### In-app update check
 
-Both apps can tell you when a new version is out: **Settings → Updates** shows your version and a **Check for updates** button. When a newer release exists, the desktop sidebar shows "Update available" and the Android Clipboard tab shows a banner. Tapping it opens the release page in your browser; you download and install the update yourself, exactly as above.
+Both apps can tell you when a new version is out: **Settings → Updates** shows your version and a **Check for updates** button. When a newer release exists, the desktop sidebar shows "Update available" and the Android Clipboard tab shows a banner. Tapping it updates the app, and nothing is downloaded until you tap:
+
+- **AppImage:** downloads the new AppImage (only the changed blocks when possible), checks its SHA-512 against the release's `latest-linux.yml`, replaces the old file and restarts. Autostart and the GNOME shortcut follow the new file name.
+- **deb:** downloads the new `.deb`, checks its SHA-512, installs it with `dpkg` (the system asks for your admin password) and restarts.
+- **Android:** downloads `Clipply-<version>.apk` from the release and opens Android's installer; you confirm with **Update**. The first time, Android asks you to allow installs from Clipply. Android only accepts an APK signed with the same key as the installed app.
+
+If an update fails, Settings → Updates offers the release page so you can install by hand, exactly as above.
 
 What it does, and what it does not do:
 
 - **One anonymous request** to GitHub: `GET https://github.com/Sharif-Minhaz/clipply/releases/latest`, reading only the version from where it redirects (the REST API is avoided because its anonymous limit of 60 requests an hour is shared by everyone on the same network). No account, device id, token or anything about your clips is sent. GitHub sees your IP address, as with any website.
 - **At most once a day**, when the app opens (Android) or its window gets focus (desktop). Nothing is polled in the background. Pressing "Check for updates" always checks.
-- **Check only.** Clipply never downloads or installs anything by itself, and the Android app does not have the "install other apps" permission.
+- **Nothing installs by itself.** The check never downloads anything; an update is downloaded and installed only after you tap it. The Android app holds the "install other apps" permission only for this, and uses it only to open the system installer for its own release APK.
 - **The link cannot be redirected.** The app reads only the version number from GitHub's answer and builds the link to `github.com/Sharif-Minhaz/clipply/releases/tag/v<version>` itself; drafts and pre-releases are ignored.
 - **You can turn it off:** Settings → Updates → "Check for updates automatically". The manual button keeps working.
 
-Implementation: [packages/sync-engine/src/update.ts](packages/sync-engine/src/update.ts).
+Implementation: [packages/sync-engine/src/update.ts](packages/sync-engine/src/update.ts) (check), [apps/desktop/electron/main/updater.ts](apps/desktop/electron/main/updater.ts) (desktop install), `installUpdate` in [ClipplyNativePlugin.kt](apps/mobile/android/app/src/main/java/co/lazycoders/clipply/ClipplyNativePlugin.kt) (Android install).
 
 ---
 
@@ -412,7 +418,7 @@ Being honest about these is part of being trustworthy:
 - Android keeps keys in WebView memory while the app is open; new items from other devices appear when you open the app (no push notifications, by design).
 - Android background capture uploads **text** immediately; images captured while the app is closed upload the next time you open it.
 - Linux on GNOME Wayland: copies from native Wayland apps cannot be attributed to an app, so the "excluded apps" setting only works for X11/XWayland windows.
-- Updates are not installed automatically: the app tells you, you download the new version from GitHub Releases.
+- Updates install only when you tap them, and the deb update needs your admin password. On Android you confirm each update in the system installer: an app outside an app store cannot install silently.
 
 The full threat model, with which protections are covered by automated tests: [docs/encryption.md §8](docs/encryption.md#8-threat-model).
 

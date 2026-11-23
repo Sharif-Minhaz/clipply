@@ -38,6 +38,15 @@ const api: DesktopApi = {
     state: () => ipcRenderer.invoke(CH.updateState),
     check: () => ipcRenderer.invoke(CH.updateCheck),
     openReleasePage: () => ipcRenderer.invoke(CH.updateOpen),
+    install: async (onProgress) => {
+      const listener = (_e: unknown, percent: number): void => onProgress?.(percent);
+      ipcRenderer.on(CH.updateProgress, listener);
+      try {
+        await ipcRenderer.invoke(CH.updateInstall);
+      } finally {
+        ipcRenderer.removeListener(CH.updateProgress, listener);
+      }
+    },
     onChange: on(CH.updateChanged),
   },
   account: {

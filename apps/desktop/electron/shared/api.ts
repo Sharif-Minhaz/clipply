@@ -46,6 +46,8 @@ export const CH = {
   updateState: 'update:state',
   updateCheck: 'update:check',
   updateOpen: 'update:open',
+  updateInstall: 'update:install',
+  updateProgress: 'update:progress',
   updateChanged: 'update:changed',
 } as const;
 
@@ -93,11 +95,12 @@ export interface DesktopApi {
   installGnomeShortcut(): Promise<void>;
   /** Deletes local history and keys; only offered when the vault cannot be opened. */
   resetVault(): Promise<void>;
-  /** Check-only update notices; see sync-engine/update.ts. */
+  /** Update notices (sync-engine/update.ts) and self-update (main/updater.ts). */
   updates: {
     state(): Promise<UpdateState>;
     check(): Promise<UpdateState>;
     openReleasePage(): Promise<void>;
+    install(onProgress?: (percent: number) => void): Promise<void>;
     onChange(cb: () => void): () => void;
   };
   account: {

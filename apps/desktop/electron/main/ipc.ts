@@ -51,6 +51,8 @@ export interface IpcDeps {
   updates: UpdateChecker;
   /** Opens the URL of the current update state in the system browser. */
   openReleasePage: () => Promise<void>;
+  /** Downloads and installs the newest release, then restarts. */
+  installUpdate: () => Promise<void>;
   /** Native save/open dialog for backup files; null when cancelled. */
   chooseBackupFile: (mode: 'save' | 'open') => Promise<string | null>;
   log: Logger;
@@ -123,6 +125,7 @@ export function registerIpc(d: IpcDeps): void {
   handle(CH.updateState, z.tuple([]), () => d.updates.state());
   handle(CH.updateCheck, z.tuple([]), () => d.updates.check({ force: true }));
   handle(CH.updateOpen, z.tuple([]), () => d.openReleasePage());
+  handle(CH.updateInstall, z.tuple([]), () => d.installUpdate());
 
   const acct = (): AccountController => {
     const a = d.account();

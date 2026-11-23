@@ -22,6 +22,7 @@ import { defaultScreenshotDir, watchScreenshots } from './screenshot/watcher';
 import type { Settings } from './settings';
 import { GNOME_BINDING, gnomeShortcutInstalled, installGnomeShortcut } from './shortcuts/gnome';
 import { createTray } from './tray/tray';
+import { installUpdate } from './updater';
 import { openVault, writeVault, type VaultState } from './vault';
 import { googleSignIn } from './account/googleOAuth';
 import { downloadBlob, sessionStore, uploadBlob } from './account/transport';
@@ -74,6 +75,8 @@ async function main(): Promise<void> {
   // Absolute: APPIMAGE is the path as typed (relative when launched as ./Clipply…), and the GNOME
   // shortcut and autostart entry run from the home folder.
   const launchCommand = app.isPackaged ? [resolve(process.env.APPIMAGE ?? process.execPath)] : [process.execPath, appRoot];
+  const installShortcut = (): Promise<void> =>
+    installGnomeShortcut(`${launchCommand.map((x) => `'${x.replace(/'/g, "'\\''")}'`).join(' ')} --toggle`, GNOME_BINDING);
 
   // History is ciphertext, but it is still nobody else's business: SQLite gives -wal/-shm the
   // database file's permissions, so the file is created 0600 before SQLite opens it.
@@ -226,7 +229,7 @@ async function main(): Promise<void> {
     deviceId: vaultState.status === 'ready' ? vaultState.vault.deviceId : null,
   });
 
-  // Check-only: one anonymous GET to GitHub, at most daily, on start and window focus (never polled).
+  // Update check: one anonymous GET to GitHub, at most daily, on start and window focus (never polled).
   const updateKv = kvRepo(db);
   const updates = new UpdateChecker({
     currentVersion: app.getVersion(),
@@ -255,7 +258,7 @@ async function main(): Promise<void> {
     core: () => core,
     library: () => library,
     status,
-    installShortcut: () => installGnomeShortcut(`${launchCommand.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')} --toggle`, GNOME_BINDING),
+    installShortcut,
     chooseBackupFile: async (mode) => {
       const filters = [{ name: 'Clipply backup', extensions: ['clipply'] }];
       if (mode === 'save') {
@@ -279,6 +282,7 @@ async function main(): Promise<void> {
     account: () => account,
     updates,
     openReleasePage: async () => shell.openExternal((await updates.state()).url),
+    installUpdate: () => installUpdate(log.child('updater'), (percent) => win?.webContents.send(CH.updateProgress, percent)),
     log: log.child('ipc'),
   });
 
@@ -298,6 +302,12 @@ async function main(): Promise<void> {
     account?.notifyLocalChange();
   });
   account?.onStatus(() => send(CH.accountChanged));
+
+  // An AppImage update lands under a new versioned file name: point autostart and the shortcut at this file.
+  if (process.env.APPIMAGE) {
+    if (core?.settings.launchAtLogin) setAutostart(true, launchCommand);
+    void gnomeShortcutInstalled().then((on) => (on ? installShortcut() : undefined)).catch((error: unknown) => log.debug('shortcut refresh failed', { error }));
+  }
 
   if (core) {
     await core.start();

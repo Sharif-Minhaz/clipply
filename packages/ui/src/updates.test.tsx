@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UpdateState } from '@clipply/sync-engine';
 
@@ -35,6 +35,34 @@ describe('UpdateNotice', () => {
     await userEvent.click(await screen.findByRole('button', { name: /0\.2\.0 is available/ }));
     expect(c.openReleasePage).toHaveBeenCalled();
   });
+
+  it('installs where the app can update itself, and retries after a failure', async () => {
+    const install = vi.fn(async () => Promise.reject(new Error("Error invoking remote method 'update:install': Error: Allow Clipply to install apps.")));
+    const c = { ...client(newer), install };
+    render(<UpdateNotice client={c} variant="banner" />);
+    const button = await screen.findByRole('button', { name: /0\.2\.0 is available/ });
+    expect(button.textContent).toContain('Tap to update.');
+    await userEvent.click(button);
+    expect((await screen.findByRole('status')).textContent).toBe('Allow Clipply to install apps. Tap to try again.');
+    await userEvent.click(button);
+    expect(install).toHaveBeenCalledTimes(2);
+    expect(c.openReleasePage).not.toHaveBeenCalled();
+  });
+  it('shows download progress, then installing', async () => {
+    let report: (p: number) => void = () => {};
+    const install = vi.fn((onProgress?: (p: number) => void) => {
+      report = onProgress!;
+      return new Promise<void>(() => {});
+    });
+    render(<UpdateNotice client={{ ...client(newer), install }} variant="banner" />);
+    await userEvent.click(await screen.findByRole('button', { name: /0\.2\.0 is available/ }));
+    expect(screen.getByRole('status').textContent).toBe('Downloading…');
+    act(() => report(41.6));
+    expect(screen.getByRole('status').textContent).toBe('Downloading 42%');
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('42');
+    act(() => report(100));
+    expect(screen.getByRole('status').textContent).toBe('Installing…');
+  });
 });
 
 describe('UpdatePanel', () => {
@@ -44,6 +72,15 @@ describe('UpdatePanel', () => {
     await userEvent.click(await screen.findByRole('button', { name: /check for updates/i }));
     expect(c.check).toHaveBeenCalled();
     await userEvent.click(await screen.findByRole('button', { name: /download 0\.2\.0/i }));
+    expect(c.openReleasePage).toHaveBeenCalled();
+  });
+
+  it('offers the release page when an install fails', async () => {
+    const c = { ...client(newer), install: vi.fn(async () => Promise.reject(new Error('download failed (404)'))) };
+    render(<UpdatePanel client={c} autoCheck onAutoCheck={() => {}} />);
+    await userEvent.click(await screen.findByRole('button', { name: /update to 0\.2\.0/i }));
+    expect(await screen.findByText('download failed (404)')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Release page' }));
     expect(c.openReleasePage).toHaveBeenCalled();
   });
 
