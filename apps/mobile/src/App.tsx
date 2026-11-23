@@ -41,7 +41,7 @@ function Shell({ rt }: { rt: Runtime }) {
   return (
     <div className="flex h-dvh flex-col bg-surface pt-[env(safe-area-inset-top)] text-ink">
       <main className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'clipboard' && <History rt={rt} base={{}} empty="Nothing saved yet. Tap Clipboard to save what you copied, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
+        {tab === 'clipboard' && <History rt={rt} base={{}} empty="Nothing saved yet. Tap + then Save clipboard to save what you copied, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
         {tab === 'favorites' && <History rt={rt} base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
         {tab === 'pinned' && <History rt={rt} base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
         {tab === 'devices' && <div className="space-y-4 px-4 py-6"><h1 className="text-2xl font-bold tracking-tight">Devices</h1><DevicesPanel account={rt.account} /></div>}
@@ -88,17 +88,11 @@ function History({ rt, base, empty }: { rt: Runtime; base: ListFilter; empty: st
     </div>
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (
-        <div className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-20 flex items-end gap-3">
-          <AddClip className="" />
-          <button
-            type="button"
-            onClick={saveClipboard}
-            aria-label="Save clipboard"
-            className="flex h-14 items-center gap-2 rounded-2xl bg-frame px-5 text-base font-semibold text-frame-ink shadow-lg"
-          >
-            <ClipboardPaste aria-hidden className="size-5 text-clip" /> Clipboard
-          </button>
-        </div>
+        <AddClip
+          dial
+          className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-20"
+          actions={[{ icon: ClipboardPaste, label: 'Save clipboard', onClick: saveClipboard }]}
+        />
       )}
       {toast && <p role="status" className="fixed inset-x-4 bottom-[calc(9rem+env(safe-area-inset-bottom))] rounded-xl bg-frame px-4 py-3 text-center text-sm text-frame-ink shadow-lg">{toast}</p>}
     </>

@@ -121,6 +121,34 @@ describe('AccountController (shared by desktop and Android)', () => {
     expect(phone.account.getStatus().sync).toMatchObject({ state: 'idle', pending: 0 });
   });
 
+  it('re-joins when the roster moved on by more than one step while this device was away', async () => {
+    const desk = await app('ines', 'Desk');
+    await desk.account.signIn();
+    const join = async (approver: Awaited<ReturnType<typeof app>>, name: string) => {
+      const x = await app('ines', name);
+      await x.account.signIn();
+      const p = (await approver.account.devices()).find((d) => d.status === 'pending')!;
+      await approver.account.startApproval(p.id);
+      await x.account.enrollment();
+      await approver.account.confirmApproval(p.id);
+      await x.account.acceptEnrollment();
+      return x;
+    };
+    const phone = await join(desk, 'Phone');
+    const tablet = await join(phone, 'Tablet'); // signed by Phone: Desk still trusts it
+    await join(tablet, 'Laptop'); // signed by Tablet: unknown to Desk's stale roster
+
+    await desk.account.init();
+    expect(desk.account.getStatus()).toMatchObject({ deviceStatus: 'authorized', vault: 'needs_enrollment' });
+    const deskId = (await tablet.account.devices()).find((d) => d.name === 'Desk')!.id;
+    const { code } = await tablet.account.approvalCode(deskId);
+    expect(await desk.account.enrollment()).toEqual({ approverName: 'Tablet', code, approved: true });
+    await desk.account.acceptEnrollment();
+    await desk.account.sync();
+    expect(desk.account.getStatus()).toMatchObject({ vault: 'ready', sync: { state: 'idle', pending: 0 } });
+    expect(desk.ring().roster).toHaveLength(4);
+  });
+
   it('a removed device signs out and back in as a new device, keeping its history', async () => {
     const laptop = await app('vera', 'Laptop');
     await laptop.account.signIn();

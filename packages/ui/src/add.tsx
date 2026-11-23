@@ -8,14 +8,21 @@ import { formatBytes } from './viewer';
 
 type PickKind = 'image' | 'file';
 
+export interface AddAction {
+  icon: ComponentType<LucideProps>;
+  label: string;
+  onClick: () => void;
+}
+
 const errorText = (e: unknown): string => (e instanceof Error ? e.message.replace(/^\w+Error: /, '') : String(e));
 
 /**
  * Floating + button: add a note, an image or a file by hand. Added items are encrypted and synced like
  * copied ones; files and images up to the single-upload limit (~10 MB) reach the other devices.
  * `className` positions the wrapper (default: fixed to the bottom-right corner).
+ * `dial` shows the choices as a Material-style speed dial (phones); `actions` adds choices nearest the button.
  */
-export function AddClip({ className = 'fixed right-8 bottom-8 z-20' }: { className?: string }) {
+export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = false, actions = [] }: { className?: string; dial?: boolean; actions?: AddAction[] }) {
   const client = useClipply();
   const [menu, setMenu] = useState(false);
   const [writing, setWriting] = useState(false);
@@ -71,6 +78,12 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20' }: { classNa
     if (what === 'text') setWriting(true);
     else inputs[what].current?.click();
   };
+  const items: AddAction[] = [
+    { icon: Type, label: 'Text', onClick: () => choose('text') },
+    { icon: Image, label: 'Image', onClick: () => choose('image') },
+    { icon: File, label: 'File', onClick: () => choose('file') },
+    ...actions.map((a) => ({ ...a, onClick: () => (setMenu(false), a.onClick()) })),
+  ];
 
   return (
     <>
@@ -78,12 +91,16 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20' }: { classNa
         <div className="relative">
           {menu && (
             <>
-              <div aria-hidden className="fixed inset-0" onMouseDown={() => setMenu(false)} />
-              <div role="menu" aria-label="Add to Clipply" className="absolute right-0 bottom-full mb-3 w-44 overflow-hidden rounded-xl border border-line bg-raised py-1 shadow-xl">
-                <MenuItem icon={Type} label="Text" onClick={() => choose('text')} />
-                <MenuItem icon={Image} label="Image" onClick={() => choose('image')} />
-                <MenuItem icon={File} label="File" onClick={() => choose('file')} />
-              </div>
+              <div aria-hidden className={`fixed inset-0 ${dial ? 'bg-black/40' : ''}`} onMouseDown={() => setMenu(false)} />
+              {dial ? (
+                <div role="menu" aria-label="Add to Clipply" className="absolute right-1 bottom-full mb-4 flex flex-col items-end gap-4">
+                  {items.map((a) => <DialAction key={a.label} {...a} />)}
+                </div>
+              ) : (
+                <div role="menu" aria-label="Add to Clipply" className="absolute right-0 bottom-full mb-3 w-44 overflow-hidden rounded-xl border border-line bg-raised py-1 shadow-xl">
+                  {items.map((a) => <MenuItem key={a.label} {...a} />)}
+                </div>
+              )}
             </>
           )}
           {toast && !menu && (
@@ -95,11 +112,11 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20' }: { classNa
             type="button"
             aria-haspopup="menu"
             aria-expanded={menu}
-            aria-label={menu ? 'Close add menu' : 'Add text, image or file'}
+            aria-label={menu ? 'Close add menu' : actions.length ? 'Add to Clipply' : 'Add text, image or file'}
             title="Add text, image or file"
             disabled={busy}
             onClick={() => setMenu((m) => !m)}
-            className="relative flex size-14 items-center justify-center rounded-2xl bg-frame text-clip shadow-lg transition-colors hover:bg-frame-hover disabled:opacity-60"
+            className={`relative flex size-14 items-center justify-center ${dial ? 'rounded-full' : 'rounded-2xl'} bg-frame text-clip shadow-lg transition-colors hover:bg-frame-hover disabled:opacity-60`}
           >
             {busy ? (
               <span aria-label="Adding" className="size-5 animate-spin rounded-full border-2 border-clip border-t-transparent" />
@@ -121,6 +138,18 @@ function MenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<LucidePr
     <button type="button" role="menuitem" onClick={onClick} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[0.9375rem] text-ink hover:bg-surface">
       <Icon aria-hidden className="size-[18px] text-muted" />
       {label}
+    </button>
+  );
+}
+
+/** Speed-dial choice: a small round button with its label beside it (always shown: touch has no hover). */
+function DialAction({ icon: Icon, label, onClick }: AddAction) {
+  return (
+    <button type="button" role="menuitem" onClick={onClick} className="flex items-center gap-3">
+      <span className="rounded-md bg-frame px-2.5 py-1 text-sm font-medium text-frame-ink shadow-md">{label}</span>
+      <span aria-hidden className="flex size-12 items-center justify-center rounded-full bg-raised text-ink shadow-lg">
+        <Icon className="size-5" />
+      </span>
     </button>
   );
 }

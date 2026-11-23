@@ -5,6 +5,7 @@ import { useState } from 'react';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 import type { ClipKind } from '@clipply/shared-schemas';
 
+import { Plus } from 'lucide-react';
 import { AddClip, ClipList, ClipplyProvider, formatBytes, formatRelative, ItemViewer, KindFilter, SearchBar, type ClipplyClient } from './index';
 
 const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
@@ -194,6 +195,17 @@ describe('shared UI', () => {
     const small = new File([new Uint8Array([1, 2, 3])], 'notes.pdf', { type: 'application/pdf' });
     await user.upload(fileInput as HTMLInputElement, small);
     await waitFor(() => expect(add).toHaveBeenLastCalledWith({ type: 'file', name: 'notes.pdf', mime: 'application/pdf', data: new Uint8Array([1, 2, 3]) }));
+  });
+
+  it('speed dial runs an extra action and closes', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn();
+    render(<ClipplyProvider client={lib.client()}><AddClip dial actions={[{ icon: Plus, label: 'Save clipboard', onClick: save }]} /></ClipplyProvider>);
+    await user.click(screen.getByRole('button', { name: 'Add to Clipply' }));
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Text', 'Image', 'File', 'Save clipboard']);
+    await user.click(screen.getByRole('menuitem', { name: 'Save clipboard' }));
+    expect(save).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 
   it('formats byte sizes', () => {

@@ -27,6 +27,9 @@ export class VaultProtocolError extends Error {
   override name = 'VaultProtocolError';
 }
 
+/** The latest envelope's signer is unknown here: the roster changed more than one step while this device was away. */
+export class UntrustedEnvelopeError extends VaultProtocolError {}
+
 const entryOf = (id: string, keys: DevicePublicKeys): RosterEntry => ({
   id,
   boxPublicKey: fromB64(keys.boxPublicKey),
@@ -175,7 +178,7 @@ export async function refreshKeyring(api: VaultApi, me: DeviceIdentity, ring: Ke
       if (!(error instanceof CryptoError)) throw error;
     }
   }
-  if (!next) throw new VaultProtocolError('envelope is not signed by a trusted device');
+  if (!next) throw new UntrustedEnvelopeError('envelope is not signed by a trusted device');
   if (!extendsKeyring(next, ring)) throw new VaultProtocolError('envelope drops keys this device already has');
   if (!rosterEntry(next, me.deviceId)) return { status: 'removed', ring };
   const same = next.current === ring.current && JSON.stringify(next.roster?.map((r) => r.id)) === JSON.stringify(ring.roster?.map((r) => r.id));

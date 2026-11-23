@@ -7,8 +7,8 @@ import type { DevicePlatform } from '@clipply/shared-schemas';
 import type { ClipLibrary } from './library';
 import { SyncEngine, type BlobDownloader, type BlobUploader } from './sync';
 import {
-  acceptEnrollment, approveDevice, createAccountVault, enrollmentCodeFor, recoverVault, refreshKeyring, replaceRecoveryKey, revokeAndRotate,
-  type DeviceIdentity, type DevicePublicKeys,
+  acceptEnrollment, approveDevice, createAccountVault, enrollmentCodeFor, recoverVault, refreshKeyring, replaceRecoveryKey, revokeAndRotate, UntrustedEnvelopeError,
+  type DeviceIdentity, type DevicePublicKeys, type RefreshResult,
 } from './vault';
 
 export interface StoredSession {
@@ -225,7 +225,15 @@ export class AccountController {
     const state = await this.api.vaultState();
     const known = (await kvRepo(this.d.db).get<number>(VAULT_VERSION)) ?? 0;
     if (!force && state.version === known) return;
-    const res = await refreshKeyring(this.api, this.identity, this.d.getKeyring());
+    let res: RefreshResult;
+    try {
+      res = await refreshKeyring(this.api, this.identity, this.d.getKeyring());
+    } catch (error) {
+      if (!(error instanceof UntrustedEnvelopeError)) throw error;
+      // Nothing local can vouch for the new signer: join again (codes match or recovery key).
+      this.update({ vault: 'needs_enrollment', sync: { ...this.status.sync, state: 'off' } });
+      return;
+    }
     if (res.status === 'removed') {
       this.update({ vault: 'removed' });
       throw new Error('this device was removed from the vault');
@@ -354,6 +362,7 @@ export class AccountController {
     this.update({ sync: { ...this.status.sync, state: 'syncing' } });
     try {
       await this.refreshVault();
+      if (this.status.vault !== 'ready') return;
       await this.engine.sync();
       this.update({ sync: { state: 'idle', lastSyncAt: this.now(), pending: await outboxRepo(this.d.db).pendingCount() } });
     } catch (error) {
