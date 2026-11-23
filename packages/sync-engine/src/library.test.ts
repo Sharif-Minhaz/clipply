@@ -98,6 +98,9 @@ describe('ClipLibrary', () => {
     await lib.capture({ type: 'html', html: '<b>bold move</b>' });
     await lib.setFlags(id, { pinned: true, favorite: undefined, title: 'Important' });
     expect(lib.list({ pinned: true }).map((v) => v.id)).toEqual([id]);
+    // A legacy pin counts as a favorite.
+    expect(lib.list({ favorite: true }).map((v) => v.id)).toEqual([id]);
+    expect(lib.list({ favorite: false }).map((v) => v.id)).not.toContain(id);
     expect(lib.list({ kinds: ['html'] })[0]?.preview).toBe('bold move');
     expect(lib.list({ query: 'important' }).map((v) => v.id)).toEqual([id]);
     const row = await itemRepo(db).get(id);

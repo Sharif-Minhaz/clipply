@@ -314,8 +314,9 @@ async function main(): Promise<void> {
     }
   });
 
-  // An AppImage update lands under a new versioned file name: point autostart and the shortcut at this file.
-  if (process.env.APPIMAGE) {
+  // An AppImage update lands under a new versioned file name, and a switch between AppImage and .deb
+  // changes the path entirely: point autostart and the shortcut at this binary.
+  if (app.isPackaged) {
     if (core?.settings.launchAtLogin) setAutostart(true, launchCommand);
     void gnomeShortcutInstalled().then((on) => (on ? installShortcut() : undefined)).catch((error: unknown) => log.debug('shortcut refresh failed', { error }));
   }

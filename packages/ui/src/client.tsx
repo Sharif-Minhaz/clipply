@@ -1,6 +1,8 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, LinkPreview, ListFilter, ManualInput, StorageStats } from '@clipply/sync-engine';
+
+import { optimistic } from './optimistic';
 
 /**
  * Everything the shared UI may ask of a platform. Desktop implements it over IPC to the main
@@ -33,8 +35,10 @@ export interface ClipplyClient {
 
 const ClipplyContext = createContext<ClipplyClient | null>(null);
 
+/** Wraps `client` in the optimistic layer: adds, deletes and flag changes show before the platform confirms. */
 export function ClipplyProvider({ client, children }: { client: ClipplyClient; children: ReactNode }) {
-  return <ClipplyContext.Provider value={client}>{children}</ClipplyContext.Provider>;
+  const value = useMemo(() => optimistic(client), [client]);
+  return <ClipplyContext.Provider value={value}>{children}</ClipplyContext.Provider>;
 }
 
 export function useClipply(): ClipplyClient {

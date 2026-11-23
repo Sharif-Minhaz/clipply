@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ClipboardPaste, Clipboard, Laptop, Pin, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinRequestBanner, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
+import { ClipboardPaste, Clipboard, Images, Laptop, Settings as SettingsIcon, Star } from 'lucide-react';
+import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -8,11 +8,11 @@ import logo from './logo.png';
 import { boot, type Runtime } from './services/runtime';
 import { SettingsScreen } from './screens/SettingsScreen';
 
-type Tab = 'clipboard' | 'favorites' | 'pinned' | 'devices' | 'settings';
+type Tab = 'clipboard' | 'favorites' | 'media' | 'devices' | 'settings';
 const TABS: Array<{ tab: Tab; label: string; icon: typeof Clipboard; hint?: string }> = [
   { tab: 'clipboard', label: 'Clipboard', icon: Clipboard, hint: 'Your copied items' },
   { tab: 'favorites', label: 'Favorites', icon: Star, hint: 'Your starred clips' },
-  { tab: 'pinned', label: 'Pinned', icon: Pin, hint: 'Your pinned clips' },
+  { tab: 'media', label: 'Media', icon: Images, hint: 'Your images and files' },
   { tab: 'devices', label: 'Devices', icon: Laptop },
   { tab: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
@@ -47,7 +47,7 @@ function Shell({ rt }: { rt: Runtime }) {
         )}
         {tab === 'clipboard' && <History rt={rt} tab={0} base={{}} empty="Nothing saved yet. Tap + then Save clipboard to save what you copied, share text or files to Clipply, or use the Clipply tile in Quick Settings." />}
         {tab === 'favorites' && <History rt={rt} tab={1} base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
-        {tab === 'pinned' && <History rt={rt} tab={2} base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
+        {tab === 'media' && <History rt={rt} tab={2} base={{ kinds: MEDIA_KINDS }} grid empty="No images or files yet. Share an image or file to Clipply, or take a screenshot." />}
         {tab === 'devices' && <div className="space-y-6 px-4 pt-6 pb-10"><h1 className="px-1 text-[1.75rem] leading-tight font-bold tracking-tight text-ink">Devices</h1><DevicesPanel account={rt.account} /></div>}
         {tab === 'settings' && <SettingsScreen rt={rt} />}
       </main>
@@ -71,7 +71,7 @@ function Shell({ rt }: { rt: Runtime }) {
   );
 }
 
-function History({ rt, tab, base, empty }: { rt: Runtime; tab: number; base: ListFilter; empty: string }) {
+function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; base: ListFilter; empty: string; grid?: boolean }) {
   const { hint } = TABS[tab]!;
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<ClipKind[]>([]);
@@ -99,10 +99,11 @@ function History({ rt, tab, base, empty }: { rt: Runtime; tab: number; base: Lis
         </div>
       }
       query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} action={<SyncButton account={rt.account} />}
+      {...(base.kinds ? { kindOptions: base.kinds } : {})}
     />
     <div className="space-y-3 px-3 pt-3 pb-24">
       {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} variant="banner" />}
-      <ClipList filter={filter} onOpen={setOpen} emptyText={empty} />
+      <ClipList filter={filter} onOpen={setOpen} emptyText={empty} layout={grid ? 'grid' : 'list'} />
     </div>
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (

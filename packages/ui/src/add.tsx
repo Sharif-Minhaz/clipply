@@ -25,8 +25,8 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message.replac
 export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = false, actions = [] }: { className?: string; dial?: boolean; actions?: AddAction[] }) {
   const client = useClipply();
   const [menu, setMenu] = useState(false);
-  const [writing, setWriting] = useState(false);
-  const [busy, setBusy] = useState(false);
+  // null = closed; otherwise the composer is open with this starting text (kept for a retry after a failed add).
+  const [writing, setWriting] = useState<string | null>(null);
   const [toast, setToast] = useState<{ text: string; error: boolean } | null>(null);
   const inputs = { image: useRef<HTMLInputElement>(null), file: useRef<HTMLInputElement>(null) };
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -47,9 +47,11 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
     return () => window.removeEventListener('keydown', onKey);
   }, [menu]);
 
-  /** Resolves true when added; errors are shown in the toast. */
+  /**
+   * Resolves true when added; errors are shown in the toast. The item is already in the list while
+   * this runs (the optimistic layer) and is taken out again if it fails.
+   */
   const add = async (input: ManualInput): Promise<boolean> => {
-    setBusy(true);
     try {
       const { duplicate } = await client.add(input);
       say(duplicate ? 'Already in history, moved to the top.' : 'Added.');
@@ -57,8 +59,6 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
     } catch (e) {
       say(`Could not add: ${errorText(e)}`, true);
       return false;
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -75,7 +75,7 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
 
   const choose = (what: 'text' | PickKind): void => {
     setMenu(false);
-    if (what === 'text') setWriting(true);
+    if (what === 'text') setWriting('');
     else inputs[what].current?.click();
   };
   const items: AddAction[] = [
@@ -114,21 +114,26 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
             aria-expanded={menu}
             aria-label={menu ? 'Close add menu' : actions.length ? 'Add to Clipply' : 'Add text, image or file'}
             title="Add text, image or file"
-            disabled={busy}
             onClick={() => setMenu((m) => !m)}
             className={`relative flex size-14 items-center justify-center ${dial ? 'rounded-full' : 'rounded-2xl'} bg-hero text-white shadow-[0_12px_28px_-10px_rgb(8_60_70/0.7)] ring-1 ring-white/10 transition hover:brightness-110 disabled:opacity-60`}
           >
-            {busy ? (
-              <span aria-label="Adding" className="size-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <Plus aria-hidden className={`size-7 transition-transform ${menu ? 'rotate-45' : ''}`} />
-            )}
+            <Plus aria-hidden className={`size-7 transition-transform ${menu ? 'rotate-45' : ''}`} />
           </button>
         </div>
       </div>
       <input ref={inputs.image} type="file" accept="image/*" hidden onChange={(e) => void onPicked('image', e.target.files).finally(() => (e.target.value = ''))} />
       <input ref={inputs.file} type="file" hidden onChange={(e) => void onPicked('file', e.target.files).finally(() => (e.target.value = ''))} />
-      {writing && <TextComposer busy={busy} error={toast?.error ? toast.text : null} onCancel={() => setWriting(false)} onSave={(text) => void add({ type: 'text', text }).then((ok) => ok && setWriting(false))} />}
+      {writing !== null && (
+        <TextComposer
+          initial={writing}
+          error={toast?.error ? toast.text : null}
+          onCancel={() => setWriting(null)}
+          onSave={(text) => {
+            setWriting(null);
+            void add({ type: 'text', text }).then((ok) => !ok && setWriting(text));
+          }}
+        />
+      )}
     </>
   );
 }
@@ -154,8 +159,8 @@ function DialAction({ icon: Icon, label, onClick }: AddAction) {
   );
 }
 
-function TextComposer({ busy, error, onCancel, onSave }: { busy: boolean; error: string | null; onCancel: () => void; onSave: (text: string) => void }) {
-  const [text, setText] = useState('');
+function TextComposer({ initial, error, onCancel, onSave }: { initial: string; error: string | null; onCancel: () => void; onSave: (text: string) => void }) {
+  const [text, setText] = useState(initial);
   const ref = useRef<HTMLTextAreaElement>(null);
   const empty = text.trim() === '';
 
@@ -184,7 +189,7 @@ function TextComposer({ busy, error, onCancel, onSave }: { busy: boolean; error:
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !empty && !busy) onSave(text);
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !empty) onSave(text);
           }}
           className="h-[40vh] min-h-32 resize-none bg-surface p-4 text-base text-ink placeholder:text-muted focus:outline-none"
         />
@@ -197,11 +202,11 @@ function TextComposer({ busy, error, onCancel, onSave }: { busy: boolean; error:
           <button type="button" onClick={onCancel} className="rounded-lg px-4 py-2 text-sm text-muted hover:text-ink">Cancel</button>
           <button
             type="button"
-            disabled={empty || busy}
+            disabled={empty}
             onClick={() => onSave(text)}
             className="rounded-lg bg-frame px-4 py-2 text-sm font-semibold text-frame-ink disabled:opacity-50"
           >
-            {busy ? 'Adding…' : 'Add'}
+            Add
           </button>
         </footer>
       </div>

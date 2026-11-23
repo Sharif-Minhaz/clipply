@@ -6,7 +6,8 @@ import type { ClipView, ListFilter } from '@clipply/sync-engine';
 import type { ClipKind } from '@clipply/shared-schemas';
 
 import { Plus } from 'lucide-react';
-import { AddClip, ClipList, ClipplyProvider, formatBytes, formatRelative, ItemViewer, KindFilter, SearchBar, type ClipplyClient } from './index';
+import { optimistic } from './optimistic';
+import { AddClip, ClipList, ClipplyProvider, formatBytes, formatRelative, ItemViewer, KindFilter, MEDIA_KINDS, SearchBar, type ClipplyClient } from './index';
 
 const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
 
@@ -25,7 +26,7 @@ class FakeLibrary {
   list(f: ListFilter = {}): ClipView[] {
     const q = f.query?.toLowerCase();
     return this.items.filter(
-      (i) => (!f.kinds || f.kinds.includes(i.meta.kind)) && (f.pinned === undefined || i.meta.pinned === f.pinned) && (!q || i.preview.toLowerCase().includes(q)),
+      (i) => (!f.kinds || f.kinds.includes(i.meta.kind)) && (f.pinned === undefined || i.meta.pinned === f.pinned) && (f.favorite === undefined || (i.meta.favorite || i.meta.pinned) === f.favorite) && (!q || i.preview.toLowerCase().includes(q)),
     );
   }
 
@@ -107,14 +108,15 @@ describe('shared UI', () => {
     expect(await screen.findByText('Nothing matches “zzz”.')).toBeTruthy();
   });
 
-  it('pins, copies and deletes through the client and re-renders on change', async () => {
+  it('favorites, copies and deletes through the client and re-renders on change', async () => {
     const user = userEvent.setup();
     const copy = vi.fn(async () => {});
     render(<ClipplyProvider client={lib.client(copy)}><Screen /></ClipplyProvider>);
     const [first] = await screen.findAllByRole('article');
-    await user.click(within(first!).getByRole('button', { name: 'Pin' }));
-    await waitFor(() => expect(within(screen.getAllByRole('article')[0]!).getByRole('button', { name: 'Unpin' }).getAttribute('aria-pressed')).toBe('true'));
-    expect(lib.list({ pinned: true })).toHaveLength(1);
+    expect(within(first!).queryByRole('button', { name: 'Pin' })).toBeNull();
+    await user.click(within(first!).getByRole('button', { name: 'Favorite' }));
+    await waitFor(() => expect(within(screen.getAllByRole('article')[0]!).getByRole('button', { name: 'Unfavorite' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(lib.list({ favorite: true })).toHaveLength(1);
 
     await user.click(within(screen.getAllByRole('article')[0]!).getByRole('button', { name: 'Copy' }));
     expect(copy).toHaveBeenCalledWith(lib.list()[0]!.id);
@@ -123,7 +125,118 @@ describe('shared UI', () => {
     await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
   });
 
-  it('selects several items and pins or deletes them together', async () => {
+  it('shows a legacy pinned item as a favorite and clears the pin when unfavorited', async () => {
+    const user = userEvent.setup();
+    const client = lib.client();
+    await client.setFlags(lib.list()[0]!.id, { pinned: true });
+    render(<ClipplyProvider client={client}><Screen /></ClipplyProvider>);
+    const [first] = await screen.findAllByRole('article');
+    await user.click(within(first!).getByRole('button', { name: 'Unfavorite' }));
+    await waitFor(() => expect(lib.list({ favorite: true })).toHaveLength(0));
+    expect(lib.list()[0]!.meta).toMatchObject({ pinned: false, favorite: false });
+  });
+
+  it('shows images and files as a gallery with copy, download, favorite and delete', async () => {
+    const user = userEvent.setup();
+    const copy = vi.fn(async () => {});
+    lib.add('img', '', 'image', Date.now() - 60_000);
+    lib.add('doc', '', 'file', Date.now() - 30_000);
+    const client = { ...lib.client(copy), saveFile: vi.fn(async () => true) };
+    render(<ClipplyProvider client={client}><ClipList filter={{ kinds: MEDIA_KINDS }} layout="grid" /></ClipplyProvider>);
+    const tiles = await screen.findAllByRole('article');
+    expect(tiles.map((t) => t.getAttribute('aria-label'))).toEqual(['File item', 'Image item']);
+    expect(within(tiles[0]!).queryByRole('button', { name: 'Copy' })).toBeNull();
+
+    await user.click(within(tiles[1]!).getByRole('button', { name: 'Copy' }));
+    expect(copy).toHaveBeenCalledWith('img');
+    await user.click(within(tiles[0]!).getByRole('button', { name: 'Download' }));
+    expect(client.saveFile).toHaveBeenCalledWith('doc');
+    await user.click(within(tiles[1]!).getByRole('button', { name: 'Favorite' }));
+    await waitFor(() => expect(lib.list({ favorite: true }).map((i) => i.id)).toEqual(['img']));
+
+    await user.click(within(screen.getAllByRole('article')[1]!).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    expect(lib.list().map((i) => i.id)).not.toContain('img');
+  });
+
+  it('shows an add, delete and favorite at once and rolls each back when the platform fails', async () => {
+    const deferred = <T,>() => {
+      let resolve!: (v: T) => void;
+      let reject!: (e: unknown) => void;
+      const promise = new Promise<T>((res, rej) => ((resolve = res), (reject = rej)));
+      return { promise, resolve, reject };
+    };
+    const base = lib.client();
+    const slowAdd = deferred<{ duplicate: boolean }>();
+    const slowRemove = deferred<void>();
+    const slowFlags = deferred<void>();
+    const client = optimistic({ ...base, add: () => slowAdd.promise, remove: () => slowRemove.promise, setFlags: () => slowFlags.promise });
+
+    const adding = client.add({ type: 'text', text: 'https://example.com' });
+    const [first] = await client.list({});
+    expect(first).toMatchObject({ preview: 'https://example.com', meta: { kind: 'url' } });
+    expect(await client.list({ kinds: ['text'] })).toHaveLength(1);
+    slowAdd.reject(new Error('offline'));
+    await expect(adding).rejects.toThrow('offline');
+    expect((await client.list({})).map((v) => v.id)).toEqual(['b', 'a']);
+
+    const removing = client.remove(['a']);
+    expect((await client.list({})).map((v) => v.id)).toEqual(['b']);
+    slowRemove.reject(new Error('locked'));
+    await expect(removing).rejects.toThrow('locked');
+    expect((await client.list({})).map((v) => v.id)).toEqual(['b', 'a']);
+
+    const starring = client.setFlags('a', { favorite: true });
+    expect((await client.list({ favorite: true })).map((v) => v.id)).toEqual(['a']);
+    slowFlags.reject(new Error('nope'));
+    await expect(starring).rejects.toThrow('nope');
+    expect(await client.list({ favorite: true })).toEqual([]);
+  });
+
+  it('lists a typed note before the platform finishes storing it', async () => {
+    const user = userEvent.setup();
+    let finish!: () => void;
+    const base = lib.client();
+    const client: ClipplyClient = {
+      ...base,
+      add: async (input) => {
+        await new Promise<void>((r) => (finish = r));
+        return base.add(input);
+      },
+    };
+    render(<ClipplyProvider client={client}><ClipList filter={{}} /><AddClip /></ClipplyProvider>);
+    await screen.findAllByRole('article');
+    await user.click(screen.getByRole('button', { name: 'Add text, image or file' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Text' }));
+    await user.type(screen.getByLabelText('Text to add'), 'instant note');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(await screen.findByText('instant note')).toBeTruthy();
+    expect(screen.getByText('Saving…')).toBeTruthy();
+    finish();
+    await waitFor(() => expect(screen.queryByText('Saving…')).toBeNull());
+  });
+
+  it('selects several gallery tiles and deletes them together', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    lib.add('img1', '', 'image', Date.now() - 60_000);
+    lib.add('img2', '', 'image', Date.now() - 50_000);
+    lib.add('doc', '', 'file', Date.now() - 30_000);
+    render(<ClipplyProvider client={lib.client()}><ClipList filter={{ kinds: MEDIA_KINDS }} layout="grid" /></ClipplyProvider>);
+    await screen.findAllByRole('article');
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Select File' }));
+    await user.click(screen.getAllByRole('button', { name: 'Select Image' })[0]!);
+    expect(screen.getByText('2 selected')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Delete selected' }));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    // Text clips outside the gallery are untouched.
+    expect(lib.list().map((i) => i.id).sort()).toEqual(['a', 'b', 'img1']);
+  });
+
+  it('selects several items and favorites or deletes them together', async () => {
     const user = userEvent.setup();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<ClipplyProvider client={lib.client()}><Screen /></ClipplyProvider>);
@@ -133,8 +246,8 @@ describe('shared UI', () => {
     await user.click(cards[0]!);
     await user.click(cards[1]!);
     expect(screen.getByText('2 selected')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Pin selected' }));
-    await waitFor(() => expect(lib.list({ pinned: true })).toHaveLength(2));
+    await user.click(screen.getByRole('button', { name: 'Favorite selected' }));
+    await waitFor(() => expect(lib.list({ favorite: true })).toHaveLength(2));
     await user.click(screen.getByRole('button', { name: 'Select' }));
     await user.click(screen.getByRole('button', { name: 'Select all' }));
     await user.click(screen.getByRole('button', { name: 'Delete selected' }));
@@ -153,6 +266,22 @@ describe('shared UI', () => {
     expect(onOpen).not.toHaveBeenCalled();
     await user.click(within(first!).getByRole('button', { name: 'Expand' }));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: lib.list()[0]!.id }));
+  });
+
+  it('viewer shows details on one line and closes from the top or the bottom bar', async () => {
+    const user = userEvent.setup();
+    const copy = vi.fn(async () => {});
+    const onClose = vi.fn();
+    render(<ClipplyProvider client={lib.client(copy)}><ItemViewer item={lib.list()[0]!} onClose={onClose} /></ClipplyProvider>);
+    const dialog = screen.getByRole('dialog', { name: 'Link item' });
+    expect(within(dialog).getByText(/^19 B · text\/plain · 2 minutes ago$/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Copy' }));
+    expect(copy).toHaveBeenCalledWith('b');
+    const closes = within(dialog).getAllByRole('button', { name: 'Close' });
+    expect(closes).toHaveLength(2);
+    await user.click(closes[1]!);
+    await user.click(closes[0]!);
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 
   it('shows Copying… while a copy is still downloading', async () => {
@@ -181,8 +310,8 @@ describe('shared UI', () => {
     await user.type(box, 'milk and eggs');
     await user.click(screen.getByRole('button', { name: /Save/ }));
     await waitFor(() => expect(lib.list().find((i) => i.id === 'a')?.preview).toBe('milk and eggs'));
-    await user.keyboard('{Escape}');
-    expect(onClose).toHaveBeenCalled();
+    // Saving closes the viewer.
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('adds text from the + menu, and rejects oversize files before reading them', async () => {

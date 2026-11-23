@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import logo from './logo.png';
-import { Clipboard, Laptop, Pause, Pin, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, AppVersion, ClipList, ItemViewer, JoinRequestBanner, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
+import { Clipboard, Images, Laptop, Pause, Play, Settings as SettingsIcon, Star } from 'lucide-react';
+import { AddClip, AppVersion, ClipList, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -10,12 +10,12 @@ import { DevicesScreen } from './DevicesScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { VaultProblem } from './VaultProblem';
 
-type Tab = 'clipboard' | 'favorites' | 'pinned' | 'devices' | 'settings';
+type Tab = 'clipboard' | 'favorites' | 'media' | 'devices' | 'settings';
 
 const NAV: Array<{ tab: Tab; label: string; icon: typeof Clipboard }> = [
   { tab: 'clipboard', label: 'Clipboard', icon: Clipboard },
   { tab: 'favorites', label: 'Favorites', icon: Star },
-  { tab: 'pinned', label: 'Pinned', icon: Pin },
+  { tab: 'media', label: 'Media', icon: Images },
   { tab: 'devices', label: 'Devices', icon: Laptop },
   { tab: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
@@ -88,7 +88,7 @@ export function App() {
         )}
         {tab === 'clipboard' && <HistoryScreen base={{}} empty="Nothing copied yet. Copy something anywhere and it lands here." />}
         {tab === 'favorites' && <HistoryScreen base={{ favorite: true }} empty="Star a clip to keep it here for quick access." />}
-        {tab === 'pinned' && <HistoryScreen base={{ pinned: true }} empty="Pin a clip to keep it at hand. Pinned clips are never deleted by cleanup." />}
+        {tab === 'media' && <HistoryScreen base={{ kinds: MEDIA_KINDS }} grid empty="No images or files yet. Copy an image or add a file and it shows up here." />}
         {tab === 'devices' && <DevicesScreen />}
         {tab === 'settings' && <SettingsScreen status={status} onChanged={refresh} />}
       </main>
@@ -96,7 +96,7 @@ export function App() {
   );
 }
 
-function HistoryScreen({ base, empty }: { base: ListFilter; empty: string }) {
+function HistoryScreen({ base, empty, grid }: { base: ListFilter; empty: string; grid?: boolean }) {
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<ClipKind[]>([]);
   const [open, setOpen] = useState<ClipView | null>(null);
@@ -116,9 +116,9 @@ function HistoryScreen({ base, empty }: { base: ListFilter; empty: string }) {
   const filter: ListFilter = { ...base, ...(query ? { query } : {}), ...(kinds.length ? { kinds } : {}) };
   return (
     <div className="pb-8">
-      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} action={<SyncButton account={window.clipply.account} />} />
-      <div className="mx-auto max-w-[calc(48rem+3rem)] px-6 pt-2">
-        <ClipList filter={filter} onOpen={setOpen} emptyText={empty} deviceNames={{}} />
+      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} action={<SyncButton account={window.clipply.account} />} {...(base.kinds ? { kindOptions: base.kinds } : {})} />
+      <div className={`mx-auto px-6 pt-2 ${grid ? 'max-w-6xl' : 'max-w-[calc(48rem+3rem)]'}`}>
+        <ClipList filter={filter} onOpen={setOpen} emptyText={empty} deviceNames={{}} layout={grid ? 'grid' : 'list'} />
       </div>
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && <AddClip />}

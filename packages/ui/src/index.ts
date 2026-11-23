@@ -1,4 +1,5 @@
 export * from './client';
+export { isPendingId } from './optimistic';
 export * from './hooks';
 export * from './time';
 export * from './components';

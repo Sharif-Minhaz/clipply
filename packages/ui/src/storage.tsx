@@ -8,7 +8,7 @@ import { formatBytes } from './viewer';
 
 const LABEL: Record<ClipKind, string> = { text: 'Text', url: 'Links', html: 'Rich text', code: 'Code', image: 'Images', file: 'Files' };
 
-/** Local history usage by kind, with clearing (pinned and favorite items are always kept). */
+/** Local history usage by kind, with clearing (favorites are always kept). */
 export function StoragePanel() {
   const client = useClipply();
   const [stats, setStats] = useState<StorageStats | null>(null);
@@ -21,7 +21,7 @@ export function StoragePanel() {
   }, [client]);
 
   const clear = (kinds: ClipKind[] | undefined, what: string): void => {
-    if (!window.confirm(`Delete ${what}, except pinned and favorite items? This also removes them from your other devices and cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${what}, except favorites? This also removes them from your other devices and cannot be undone.`)) return;
     setNote(null);
     client.clear(kinds).then((n) => setNote(`Deleted ${n} item${n === 1 ? '' : 's'}.`), (e: unknown) => setNote(e instanceof Error ? e.message : String(e)));
   };
@@ -34,7 +34,7 @@ export function StoragePanel() {
         <span className="text-ink">On this device</span>
         <span className="text-muted tabular-nums">
           {stats.count} clip{stats.count === 1 ? '' : 's'}, {formatBytes(stats.bytes)}
-          {stats.kept > 0 && <>, {stats.kept} pinned or favorite</>}
+          {stats.kept > 0 && <>, {stats.kept} favorite</>}
         </span>
       </p>
       {kinds.length > 0 && (

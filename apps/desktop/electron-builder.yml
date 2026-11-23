@@ -12,7 +12,8 @@ files:
 linux:
   target: [AppImage, deb]
   category: Utility
-  icon: resources/icon.png
+  # Folder of NxN.png: a lone 1024px PNG installs to hicolor/1024x1024, which GNOME never searches.
+  icon: resources/icons
   executableName: clipply
   syncDesktopName: true
   maintainer: Clipply <clipply@users.noreply.github.com>

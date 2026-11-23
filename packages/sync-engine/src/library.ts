@@ -56,6 +56,7 @@ export interface StorageStats {
 export interface ListFilter {
   kinds?: readonly ClipKind[];
   pinned?: boolean;
+  /** Pinned is retired in the UI; a pinned item counts as a favorite. */
   favorite?: boolean;
   query?: string;
   limit?: number;
@@ -232,7 +233,7 @@ export class ClipLibrary {
     for (const e of this.index.values()) {
       if (filter.kinds && !filter.kinds.includes(e.meta.kind)) continue;
       if (filter.pinned !== undefined && e.meta.pinned !== filter.pinned) continue;
-      if (filter.favorite !== undefined && e.meta.favorite !== filter.favorite) continue;
+      if (filter.favorite !== undefined && (e.meta.favorite || e.meta.pinned) !== filter.favorite) continue;
       if (q && !e.searchText.includes(q)) continue;
       out.push({ id: e.id, meta: e.meta, preview: e.preview, hasThumb: e.hasThumb });
     }

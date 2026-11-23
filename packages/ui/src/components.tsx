@@ -1,15 +1,25 @@
 import { useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
-import { Check, CheckSquare, Code, Copy, Download, File, Maximize2, Image, Link, Pilcrow, Pin, PinOff, Search, Square, Star, Trash, Type, X, type LucideProps } from 'lucide-react';
+import { Check, CheckSquare, Code, Copy, Download, File, Maximize2, Image, Link, Pilcrow, Search, Square, Star, StarOff, Trash, Type, X, type LucideProps } from 'lucide-react';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
+import { isPendingId } from './optimistic';
 import { useClipList, useLinkPreview, useThumbUrl } from './hooks';
 import { formatRelative } from './time';
+import { formatBytes } from './viewer';
 
 export const KIND_LABEL: Record<ClipKind, string> = {
   text: 'Text', url: 'Link', code: 'Code', html: 'Rich text', image: 'Image', file: 'File',
 };
+
+export const MEDIA_KINDS: readonly ClipKind[] = ['image', 'file'];
+
+/** Pinning is retired; items pinned by older versions show and behave as favorites. */
+export const isFavorite = (meta: ClipView['meta']): boolean => meta.favorite || meta.pinned;
+
+/** Unfavoriting also clears a legacy pin, or the item would stay a favorite. */
+const favoriteFlags = (on: boolean): { favorite: boolean; pinned?: false } => (on ? { favorite: true } : { favorite: false, pinned: false });
 
 export const KIND_ICON: Record<ClipKind, ComponentType<LucideProps>> = {
   text: Type, url: Link, code: Code, html: Pilcrow, image: Image, file: File,
@@ -36,12 +46,12 @@ export function SearchBar({ value, onChange, inputRef }: { value: string; onChan
  * Pills on the page; glass pills inside a `data-hero` header. Below `sm` (phones) only the icons show, so the
  * row stays on one line; the label is still the button's accessible name and tooltip.
  */
-export function KindFilter({ value, onChange }: { value: readonly ClipKind[]; onChange: (v: ClipKind[]) => void }) {
+export function KindFilter({ value, onChange, options }: { value: readonly ClipKind[]; onChange: (v: ClipKind[]) => void; options?: readonly ClipKind[] | undefined }) {
   const toggle = (kind: ClipKind): void =>
     onChange(value.includes(kind) ? value.filter((k) => k !== kind) : [...value, kind]);
   return (
     <div role="group" aria-label="Filter by type" className="grid grid-cols-6 gap-2 sm:flex sm:flex-wrap">
-      {(Object.keys(KIND_LABEL) as ClipKind[]).map((kind) => {
+      {(options ?? (Object.keys(KIND_LABEL) as ClipKind[])).map((kind) => {
         const on = value.includes(kind);
         const Icon = KIND_ICON[kind];
         return (
@@ -78,6 +88,8 @@ export function SearchStrip(props: {
   action?: ReactNode;
   hero?: boolean;
   heading?: ReactNode;
+  /** Type pills to offer; all kinds by default. */
+  kindOptions?: readonly ClipKind[];
 }) {
   return (
     <div
@@ -95,7 +107,7 @@ export function SearchStrip(props: {
           <div className="min-w-0 flex-1"><SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} /></div>
           {props.action}
         </div>
-        <KindFilter value={props.kinds} onChange={props.onKinds} />
+        <KindFilter value={props.kinds} onChange={props.onKinds} options={props.kindOptions} />
       </div>
     </div>
   );
@@ -121,6 +133,9 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
   const isFile = meta.kind === 'file';
+  const fav = isFavorite(meta);
+  // Shown optimistically while the add is still being stored; nothing to act on yet.
+  const pending = isPendingId(item.id);
   // Files cannot go on the clipboard, so their primary action is Save.
   const primary = async (): Promise<void> => {
     if (isFile) return void (await client.saveFile(item.id));
@@ -159,13 +174,12 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
       <header className="flex min-w-0 items-center gap-2 text-xs text-muted">
         {onSelect && (selected ? <CheckSquare aria-hidden className="size-4 text-accent" /> : <Square aria-hidden className="size-4" />)}
         <span className="text-sm font-semibold text-(--kind)">{KIND_LABEL[meta.kind]}</span>
-        {meta.pinned && <Pin aria-label="Pinned" className="size-3.5 fill-accent text-accent" />}
-        {meta.favorite && <Star aria-label="Favorite" className="size-3.5 fill-accent text-accent" />}
+        {isFavorite(meta) && <Star aria-label="Favorite" className="size-3.5 fill-accent text-accent" />}
         {meta.title && <span className="truncate font-semibold text-ink">{meta.title}</span>}
         <span className="ml-auto whitespace-nowrap">
-          {copying ? (
+          {copying || pending ? (
             <span role="status" className="flex items-center gap-1 font-semibold text-accent">
-              <span aria-hidden className="size-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> Copying…
+              <span aria-hidden className="size-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> {pending ? 'Saving…' : 'Copying…'}
             </span>
           ) : copied ? (
             <span role="status" className="flex items-center gap-1 font-semibold text-accent"><Check aria-hidden className="size-4" /> Copied</span>
@@ -176,13 +190,13 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
             </>
           )}
         </span>
-        {onOpen && !onSelect && <span className="-my-1"><IconButton icon={Maximize2} label="Expand" onClick={() => onOpen(item)} /></span>}
+        {onOpen && !onSelect && !pending && <span className="-my-1"><IconButton icon={Maximize2} label="Expand" onClick={() => onOpen(item)} /></span>}
       </header>
 
       <button
         type="button"
         onClick={onSelect ?? act(primary)}
-        disabled={busy && !onSelect}
+        disabled={(busy || pending) && !onSelect}
         {...(onSelect ? { 'aria-pressed': !!selected } : {})}
         title={onSelect ? undefined : isFile ? 'Click to save' : 'Click to copy'}
         aria-label={`${onSelect ? 'Select' : isFile ? 'Save' : 'Copy'} ${KIND_LABEL[meta.kind].toLowerCase()} item`}
@@ -211,10 +225,9 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
         )}
       </button>
 
-      {!onSelect && <footer className="col-span-2 -ml-2 flex items-center gap-0.5 sm:col-span-1 sm:col-start-2">
+      {!onSelect && !pending && <footer className="col-span-2 -ml-2 flex items-center gap-0.5 sm:col-span-1 sm:col-start-2">
         {meta.kind === 'image' && <IconButton icon={Download} label="Save" disabled={busy} onClick={act(async () => void (await client.saveFile(item.id)))} />}
-        <IconButton icon={Pin} label={meta.pinned ? 'Unpin' : 'Pin'} pressed={meta.pinned} disabled={busy} onClick={act(() => client.setFlags(item.id, { pinned: !meta.pinned }))} />
-        <IconButton icon={Star} label={meta.favorite ? 'Unfavorite' : 'Favorite'} pressed={meta.favorite} disabled={busy} onClick={act(() => client.setFlags(item.id, { favorite: !meta.favorite }))} />
+        <IconButton icon={Star} label={fav ? 'Unfavorite' : 'Favorite'} pressed={fav} disabled={busy} onClick={act(() => client.setFlags(item.id, favoriteFlags(!fav)))} />
         <IconButton icon={Trash} label="Delete" danger disabled={busy} onClick={act(() => client.remove([item.id]))} />
         <button
           type="button"
@@ -262,17 +275,25 @@ export function ClipList(props: {
   now?: number;
   onOpen?: (item: ClipView) => void;
   emptyText?: string;
+  /** `grid`: a gallery of tiles (the Media tab). */
+  layout?: 'list' | 'grid';
 }) {
-  const { filter, deviceNames = {}, now = Date.now(), onOpen } = props;
+  const { filter, deviceNames = {}, now = Date.now(), onOpen, layout = 'list' } = props;
   const client = useClipply();
   const { items, error } = useClipList(filter);
-  // null = normal mode; a set = selection mode (bulk pin / unpin / delete).
+  // null = normal mode; a set = selection mode (bulk favorite / unfavorite / delete).
   const [selected, setSelected] = useState<ReadonlySet<string> | null>(null);
   if (error) return <p role="alert" className="p-4 text-sm text-danger">Could not load history: {error.message}</p>;
   if (!items) {
     return (
       <div aria-busy="true" className="space-y-2">
-        {[0, 1, 2].map((i) => <div key={i} className="h-28 animate-pulse rounded-2xl bg-raised" />)}
+        {layout === 'grid' ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => <div key={i} className="aspect-square animate-pulse rounded-2xl bg-raised" />)}
+          </div>
+        ) : (
+          [0, 1, 2].map((i) => <div key={i} className="h-28 animate-pulse rounded-2xl bg-raised" />)
+        )}
       </div>
     );
   }
@@ -294,8 +315,8 @@ export function ClipList(props: {
           <>
             <span className="mr-auto font-semibold text-ink">{visible.length} selected</span>
             <IconButton icon={CheckSquare} label="Select all" onClick={() => setSelected(new Set(items.map((i) => i.id)))} />
-            <IconButton icon={Pin} label="Pin selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, { pinned: true }))))} />
-            <IconButton icon={PinOff} label="Unpin selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, { pinned: false }))))} />
+            <IconButton icon={Star} label="Favorite selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, favoriteFlags(true)))))} />
+            <IconButton icon={StarOff} label="Unfavorite selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, favoriteFlags(false)))))} />
             <IconButton
               icon={Trash}
               label="Delete selected"
@@ -309,16 +330,117 @@ export function ClipList(props: {
           <button type="button" onClick={() => setSelected(new Set())} className="ml-auto rounded-full bg-raised px-3.5 py-1.5 font-medium ring-1 ring-line hover:text-ink">Select</button>
         )}
       </div>
-      <ul className="space-y-3">
-        {items.map((item) => (
-          <li key={item.id}>
-            <ClipCard
-              item={item} now={now} deviceName={deviceNames[item.meta.originDeviceId]} onOpen={onOpen}
-              {...(selected ? { selected: selected.has(item.id), onSelect: () => toggle(item.id) } : {})}
-            />
-          </li>
-        ))}
-      </ul>
+      {layout === 'grid' ? (
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {items.map((item) => (
+            <li key={item.id}>
+              <MediaTile item={item} now={now} onOpen={onOpen} {...(selected ? { selected: selected.has(item.id), onSelect: () => toggle(item.id) } : {})} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="space-y-3">
+          {items.map((item) => (
+            <li key={item.id}>
+              <ClipCard
+                item={item} now={now} deviceName={deviceNames[item.meta.originDeviceId]} onOpen={onOpen}
+                {...(selected ? { selected: selected.has(item.id), onSelect: () => toggle(item.id) } : {})}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
+  );
+}
+
+/**
+ * One gallery tile: the image thumbnail, or a file's icon, name and size, with copy (images), download,
+ * favorite and delete. Delete is the same library removal as the list, so the clip also leaves the
+ * Clipboard tab and the deletion syncs to other devices. Clicking the preview opens the viewer.
+ */
+export function MediaTile({ item, now, onOpen, selected, onSelect }: Omit<CardProps, 'deviceName'>) {
+  const client = useClipply();
+  const { meta } = item;
+  const isFile = meta.kind === 'file';
+  const thumb = useThumbUrl(item.id, !isFile && item.hasThumb);
+  const fav = isFavorite(meta);
+  const name = isFile ? meta.file?.name ?? 'File' : meta.title ?? 'Image';
+  const KindIcon = KIND_ICON[meta.kind];
+  const pending = isPendingId(item.id);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const act = (fn: () => Promise<void>) => async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = act(async () => {
+    await client.copy(item.id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  });
+  const open = (): void => {
+    if (onOpen) return onOpen(item);
+    void (isFile ? client.saveFile(item.id) : copy());
+  };
+
+  return (
+    <article
+      aria-label={`${KIND_LABEL[meta.kind]} item`}
+      style={{ '--kind': `var(--color-kind-${meta.kind})` } as CSSProperties}
+      className={`relative overflow-hidden rounded-2xl bg-raised ring-1 transition-shadow ${
+        selected ? 'ring-2 ring-accent' : 'shadow-[0_1px_2px_rgb(0_0_0/0.04),0_10px_24px_-16px_rgb(8_50_60/0.35)] ring-line/60 hover:shadow-[0_1px_2px_rgb(0_0_0/0.05),0_14px_30px_-14px_rgb(8_50_60/0.4)]'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onSelect ?? open}
+        disabled={pending && !onSelect}
+        {...(onSelect ? { 'aria-pressed': !!selected } : {})}
+        aria-label={`${onSelect ? 'Select' : 'Open'} ${name}`}
+        title={name}
+        className="block w-full cursor-pointer text-left"
+      >
+        <div className="flex aspect-square items-center justify-center bg-surface">
+          {thumb ? (
+            <img src={thumb} alt={meta.title ?? 'Clipboard image'} loading="lazy" className="size-full object-cover" />
+          ) : (
+            <span aria-hidden className="flex size-14 items-center justify-center rounded-2xl bg-(--kind)/12 text-(--kind)">
+              <KindIcon className="size-7" />
+            </span>
+          )}
+        </div>
+        <div className="space-y-0.5 px-3 pt-2">
+          <p className="truncate text-sm font-semibold text-ink">{name}</p>
+          <p className="truncate text-xs text-muted">
+            {pending ? (
+              <span role="status" className="font-semibold text-accent">Saving…</span>
+            ) : copied ? (
+              <span role="status" className="font-semibold text-accent">Copied</span>
+            ) : (
+              <>{formatBytes(meta.size)} · <time dateTime={new Date(meta.createdAt).toISOString()}>{formatRelative(meta.createdAt, now)}</time></>
+            )}
+          </p>
+        </div>
+      </button>
+      {onSelect ? (
+        <span aria-hidden className="pointer-events-none absolute top-2 left-2 rounded-md bg-raised/90 p-0.5">
+          {selected ? <CheckSquare className="size-4 text-accent" /> : <Square className="size-4 text-muted" />}
+        </span>
+      ) : pending ? (
+        <div aria-hidden className="h-10" />
+      ) : (
+        <footer className="flex items-center gap-0.5 px-1 pb-1">
+          {!isFile && <IconButton icon={Copy} label="Copy" disabled={busy} onClick={() => void copy()} />}
+          <IconButton icon={Download} label="Download" disabled={busy} onClick={act(async () => void (await client.saveFile(item.id)))} />
+          <IconButton icon={Star} label={fav ? 'Unfavorite' : 'Favorite'} pressed={fav} disabled={busy} onClick={act(() => client.setFlags(item.id, favoriteFlags(!fav)))} />
+          <span className="ml-auto"><IconButton icon={Trash} label="Delete" danger disabled={busy} onClick={act(() => client.remove([item.id]))} /></span>
+        </footer>
+      )}
+    </article>
   );
 }

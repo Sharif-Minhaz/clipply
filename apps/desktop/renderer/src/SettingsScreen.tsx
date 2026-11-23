@@ -78,7 +78,7 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
         </div>
       </SettingsSection>
 
-      <SettingsSection title="History" description="Pinned and favorite clips are always kept.">
+      <SettingsSection title="History" description="Favorite clips are always kept.">
         <SettingRow label={<label htmlFor="retention">Keep clips for</label>}>
           <select id="retention" value={settings.retentionDays} onChange={(e) => void update({ retentionDays: Number(e.target.value) })} className={selectClass}>
             {RETENTION.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
