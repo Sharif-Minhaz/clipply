@@ -6,7 +6,7 @@ Clipply: end-to-end-encrypted clipboard history synced between an Ubuntu desktop
 
 ## Commands
 
-npm workspaces, Node ≥ 24. Android builds need JDK 21+ and the Android SDK.
+npm workspaces, Node ≥ 24, npm ≥ 11.19.1 (enforced by `devEngines`; older npm writes a lockfile CI's `npm ci` rejects). Android builds need JDK 21+ and the Android SDK.
 
 ```sh
 npm install
