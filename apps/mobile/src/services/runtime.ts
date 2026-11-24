@@ -13,6 +13,7 @@ import type { AccountClient, BackupActions, ClipplyClient, UpdateClient } from '
 
 import { b64ToBytes, bytesToB64, ClipplyNative, type InboxEntry } from './native';
 import { decodeImage } from './images';
+import { recognizeWith, tesseract } from './ocr';
 import { openCapacitorDb } from './sqlite';
 
 const log = createLogger('mobile');
@@ -111,7 +112,10 @@ export async function boot(): Promise<Runtime> {
   let controller: AccountController | null = null;
   const library = new ClipLibrary({
     db, keyring: () => vault.keyring, deviceId: vault.deviceId, fetchBlob: (id) => controller!.engine.fetchBlob(id),
-    recognizeText: async (image) => (await ClipplyNative.recognizeText({ data: bytesToB64(image) })).text,
+    recognizeText: (image, mime) => recognizeWith(
+      async () => (await ClipplyNative.recognizeText({ data: bytesToB64(image) })).text,
+      () => tesseract(image, mime),
+    ),
   });
   await library.load();
 

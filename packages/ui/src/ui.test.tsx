@@ -478,6 +478,24 @@ describe('keyboard, transforms and image text', () => {
     expect(screen.getByDisplayValue('Total: 9.99 EUR')).toBeTruthy();
   });
 
+  it('Scan again replaces a stored result, including "no text found"', async () => {
+    const user = userEvent.setup();
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    lib.add('img', '', 'image', Date.now());
+    const copyText = vi.fn(async () => {});
+    const recognizeText = vi.fn(async () => 'আমার সোনার বাংলা');
+    const added = lib.list().find((i) => i.id === 'img')!;
+    const item = { ...added, meta: { ...added.meta, ocr: '' } };
+    render(<ClipplyProvider client={{ ...lib.client(), copyText, recognizeText }}><ItemViewer item={item} onClose={() => {}} /></ClipplyProvider>);
+    expect(await screen.findByText('No text found')).toBeTruthy();
+    expect(recognizeText).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Scan again' }));
+    expect(await screen.findByDisplayValue('আমার সোনার বাংলা')).toBeTruthy();
+    expect(copyText).toHaveBeenCalledWith('আমার সোনার বাংলা');
+    expect(screen.queryByText('No text found')).toBeNull();
+  });
+
   it('the card scan button opens the image and starts copying its text at once', async () => {
     const user = userEvent.setup();
     URL.createObjectURL = vi.fn(() => 'blob:x');

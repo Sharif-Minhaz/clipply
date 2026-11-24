@@ -88,9 +88,11 @@ export interface LibraryDeps {
  */
 export const MAX_OCR_BYTES = 1400;
 
+const tidyOcr = (text: string): string => text.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+
 /** Tidies recognized text and cuts it to MAX_OCR_BYTES (measured as JSON, since that is what is sealed). */
 export function fitOcr(text: string): string {
-  let t = text.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+  let t = tidyOcr(text);
   while (utf8(JSON.stringify(t)).length - 2 > MAX_OCR_BYTES) t = t.slice(0, Math.floor(t.length * 0.9)).trimEnd();
   return t;
 }
@@ -252,20 +254,22 @@ export class ClipLibrary {
 
   /**
    * Recognizes the text in an image item on this device (the viewer's "Copy text"; never automatic) and
-   * stores it with the item, so it syncs and becomes searchable. Resolves with the stored text ('' = none).
+   * stores it with the item, so it syncs and becomes searchable. Resolves with all of the text ('' = none);
+   * only the copy kept in the meta is cut to MAX_OCR_BYTES (about 460 Bengali characters).
    */
   async recognize(id: string): Promise<string> {
     const view = this.get(id);
     if (view?.meta.kind !== 'image') throw new TypeError('only images have text to recognize');
     if (!this.deps.recognizeText) throw new Error('text recognition is not available on this device');
-    const text = fitOcr(await this.deps.recognizeText(await this.readBody(id), view.meta.mime));
+    const full = tidyOcr(await this.deps.recognizeText(await this.readBody(id), view.meta.mime));
+    const text = fitOcr(full);
     await this.tx.transaction(async (db) => {
       const row = await this.requireRow(id, db);
       const { dek, meta } = this.openRow(row);
       if (meta.ocr !== text) await this.save(db, { ...row, meta: sealMeta(dek, id, { ...meta, ocr: text }) }, this.now());
     });
     await this.reindex(id);
-    return text;
+    return full;
   }
 
   list(filter: ListFilter = {}): ClipView[] {

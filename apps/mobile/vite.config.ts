@@ -9,4 +9,11 @@ const devCsp: Plugin = {
   transformIndexHtml: (html) => html.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'"),
 };
 
-export default defineConfig({ plugins: [react(), tailwindcss(), devCsp], build: { target: 'es2022' } });
+export default defineConfig({
+  plugins: [react(), tailwindcss(), devCsp],
+  build: {
+    target: 'es2022',
+    // The Android build unpacks .gz assets and drops the extension, so the WebView would get a 404 (OCR data).
+    rollupOptions: { output: { assetFileNames: (a) => `assets/[name]-[hash]${a.names[0]?.endsWith('.gz') ? '.bin' : '[extname]'}` } },
+  },
+});

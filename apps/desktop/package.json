@@ -23,6 +23,7 @@
     "@clipply/sync-engine": "*",
     "@clipply/ui": "*",
     "@tailwindcss/vite": "^4.3.5",
+    "@tesseract.js-data/ben": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

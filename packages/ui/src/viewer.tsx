@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Check, Copy, Download, ExternalLink, Maximize, Pencil, Save, Scan, ScanText, Trash, WandSparkles, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Check, Copy, Download, ExternalLink, Maximize, Pencil, RefreshCw, Save, Scan, ScanText, Trash, WandSparkles, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ClipView } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
@@ -289,6 +289,7 @@ function TextPane({ id, text, mono, onSaved }: { id: string; text: string; mono:
  * An image plus its text. OCR never runs by itself: "Copy text" recognizes the text on this device (a scan
  * sweeps the image meanwhile), copies it, and stores it with the item so it syncs and is searchable. The
  * text opens in an editor: changes there only affect what is copied next, the stored text stays as read.
+ * "Scan again" replaces a stored result, such as one from before its language was supported.
  */
 function ImageView({ id, bytes, mime, alt, initialText, scanNow }: { id: string; bytes: Uint8Array; mime: string; alt: string; initialText: string | undefined; scanNow: boolean }) {
   const client = useClipply();
@@ -299,11 +300,11 @@ function ImageView({ id, bytes, mime, alt, initialText, scanNow }: { id: string;
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const copyText = async (): Promise<void> => {
+  const copyText = async (rescan = false): Promise<void> => {
     setError(null);
     try {
       let t = draft;
-      if (text === undefined) {
+      if (rescan || text === undefined) {
         setScanning(true);
         t = await client.recognizeText(id).finally(() => setScanning(false));
         setText(t);
@@ -334,20 +335,24 @@ function ImageView({ id, bytes, mime, alt, initialText, scanNow }: { id: string;
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-muted">
           <ScanText aria-hidden className="size-4 shrink-0" />
           <span className="font-semibold text-ink">Text in image</span>
-          {text === '' ? (
-            <span className="ml-auto">No text found</span>
-          ) : (
-            <span className="ml-auto flex items-center gap-1.5">
-              {open && (
-                <button type="button" aria-label="Close text" onClick={() => setShown(false)} className="flex items-center gap-1.5 rounded-full px-3 py-1 hover:bg-raised hover:text-ink">
-                  <X aria-hidden className="size-4" /> Close
-                </button>
-              )}
+          <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+            {text === '' && !scanning && <span>No text found</span>}
+            {text !== undefined && (
+              <button type="button" onClick={() => void copyText(true)} disabled={scanning} className="flex items-center gap-1.5 rounded-full px-3 py-1 hover:bg-raised hover:text-ink disabled:opacity-50">
+                <RefreshCw aria-hidden className="size-4" /> Scan again
+              </button>
+            )}
+            {open && (
+              <button type="button" aria-label="Close text" onClick={() => setShown(false)} className="flex items-center gap-1.5 rounded-full px-3 py-1 hover:bg-raised hover:text-ink">
+                <X aria-hidden className="size-4" /> Close
+              </button>
+            )}
+            {text !== '' && (
               <button type="button" onClick={() => void copyText()} disabled={scanning || (text !== undefined && !draft.trim())} className="flex items-center gap-1.5 rounded-full px-3 py-1 ring-1 ring-line hover:bg-raised hover:text-ink disabled:opacity-50">
                 {copied ? <Check aria-hidden className="size-4" /> : <Copy aria-hidden className="size-4" />} {scanning ? 'Scanning…' : copied ? 'Copied' : 'Copy text'}
               </button>
-            </span>
-          )}
+            )}
+          </span>
           {error && <span role="alert" className="w-full break-words text-danger">{error}</span>}
         </div>
         {open && (

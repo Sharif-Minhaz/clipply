@@ -197,7 +197,7 @@ class ClipplyNativePlugin : Plugin() {
      * Device pairing QR. Google's code scanner runs in Play services' own screen, so Clipply needs no
      * camera permission and never sees camera frames; only the decoded text comes back.
      */
-    /** On-device OCR (ML Kit via Play services; the model arrives with the app, see the manifest). Latin script. */
+    /** On-device OCR (ML Kit via Play services; the model arrives with the app, see the manifest). Latin script; ML Kit has no Bengali, see ocr.ts. */
     @PluginMethod
     fun recognizeText(call: PluginCall) = guard(call) {
         val bytes = Base64.decode(call.getString("data") ?: return@guard call.reject("data is required"), Base64.DEFAULT)

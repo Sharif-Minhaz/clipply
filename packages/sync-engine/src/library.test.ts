@@ -264,7 +264,9 @@ describe('text recognition', () => {
     expect(utf8(JSON.stringify(fitOcr(long))).length - 2).toBeLessThanOrEqual(MAX_OCR_BYTES);
     const ocr = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, now: () => clock++, recognizeText: async () => long });
     const { id } = (await ocr.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(4) }))!;
-    await ocr.recognize(id);
+    // The caller gets everything to copy; only the stored copy is cut.
+    expect(await ocr.recognize(id)).toBe(long.trim());
+    expect(ocr.get(id)?.meta.ocr).toBe(fitOcr(long));
     await ocr.setFlags(id, { title: 'শ'.repeat(200) });
     const row = (await itemRepo(db).get(id))!;
     expect(EncryptedItem.shape.meta.safeParse(toB64(row.meta)).success).toBe(true);

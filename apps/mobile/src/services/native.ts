@@ -25,7 +25,7 @@ export interface ClipplyNativePlugin {
   /** `timestamp`: when the clip was set (Android 8+), 0 when unknown. */
   readClipboard(): Promise<{ type: 'none' | 'sensitive' | 'text' | 'image'; text?: string; data?: string; mime?: string; timestamp?: number }>;
   writeClipboardText(o: { text: string }): Promise<void>;
-  /** On-device OCR of an image (base64); Latin script. */
+  /** On-device OCR of an image (base64); Latin script only, see ocr.ts for Bengali. */
   recognizeText(o: { data: string }): Promise<{ text: string }>;
   writeClipboardImage(o: { data: string; mime: string }): Promise<void>;
   /** Items captured while the WebView was not running (share sheet, text selection, tile, screenshots). */

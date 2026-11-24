@@ -1,10 +1,13 @@
 import { join } from 'node:path';
 import { createWorker, OEM, type Worker } from 'tesseract.js';
 
+/** Bengali must come first: as the primary language it reads Bengali lines that `eng+ben` turns into Latin. */
+const LANGS = 'ben+eng';
+
 /**
- * On-device OCR with tesseract.js (English). `dir` holds ocr-worker.js, the core .wasm files and
- * eng.traineddata.gz, all copied there at build time, so nothing is downloaded. The worker (~100 MB)
- * is started on first use and stopped after `idleMs` without work.
+ * On-device OCR with tesseract.js. `dir` holds ocr-worker.js, the core .wasm files and the
+ * *.traineddata.gz of every language below, all copied there at build time, so nothing is downloaded.
+ * The worker (~100 MB) is started on first use and stopped after `idleMs` without work.
  */
 export function tesseractRecognizer(dir: string, idleMs = 60_000): { recognize: (image: Uint8Array) => Promise<string>; stop: () => Promise<void> } {
   // Packaged builds unpack out/main (electron-builder asarUnpack): worker threads load from the real file system.
@@ -21,7 +24,7 @@ export function tesseractRecognizer(dir: string, idleMs = 60_000): { recognize: 
     stop,
     recognize: async (image) => {
       if (timer) clearTimeout(timer);
-      worker ??= createWorker('eng', OEM.LSTM_ONLY, { workerPath: join(real, 'ocr-worker.js'), langPath: real, cacheMethod: 'none', gzip: true });
+      worker ??= createWorker(LANGS, OEM.LSTM_ONLY, { workerPath: join(real, 'ocr-worker.js'), langPath: real, cacheMethod: 'none', gzip: true });
       try {
         const { data } = await (await worker).recognize(Buffer.from(image));
         return data.text;
