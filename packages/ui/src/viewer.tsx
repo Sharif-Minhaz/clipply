@@ -222,13 +222,19 @@ function TextPane({ id, text, mono, onSaved }: { id: string; text: string; mono:
             <Pencil aria-hidden className="size-4" /> Edit
           </button>
         )}
-        {error && <span role="alert" className="text-danger">{error}</span>}
+        {error ? <span role="alert" className="text-danger">{error}</span> : editing && <span className="ml-auto hidden text-xs sm:inline">Ctrl+Enter to save</span>}
       </div>
       {editing ? (
         <textarea
           aria-label="Edit text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !saving) {
+              e.preventDefault();
+              void save();
+            }
+          }}
           className={`min-h-0 flex-1 resize-none bg-surface p-4 text-base text-ink focus:outline-none ${mono ? 'font-mono text-sm' : ''}`}
         />
       ) : (

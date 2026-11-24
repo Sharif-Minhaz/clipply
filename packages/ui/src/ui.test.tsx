@@ -324,6 +324,19 @@ describe('shared UI', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('saves an edit with Ctrl+Enter', async () => {
+    const user = userEvent.setup();
+    const item = lib.list().find((i) => i.id === 'a')!;
+    const onClose = vi.fn();
+    render(<ClipplyProvider client={lib.client()}><ItemViewer item={item} onClose={onClose} /></ClipplyProvider>);
+    await user.click(await screen.findByRole('button', { name: /Edit/ }));
+    const box = screen.getByLabelText('Edit text');
+    await user.clear(box);
+    await user.type(box, 'bread{Control>}{Enter}{/Control}');
+    await waitFor(() => expect(lib.list().find((i) => i.id === 'a')?.preview).toBe('bread'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('adds text from the + menu, and rejects oversize files before reading them', async () => {
     const user = userEvent.setup();
     const add = vi.fn(async () => ({ duplicate: false }));
