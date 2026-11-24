@@ -16,6 +16,8 @@ const api: DesktopApi = {
   readThumb: (id) => ipcRenderer.invoke(CH.thumb, id),
   readBody: (id) => ipcRenderer.invoke(CH.body, id),
   copy: (id) => ipcRenderer.invoke(CH.copy, id),
+  copyText: (text) => ipcRenderer.invoke(CH.copyText, text),
+  recognizeText: (id) => ipcRenderer.invoke(CH.recognize, id),
   saveFile: (id) => ipcRenderer.invoke(CH.saveFile, id),
   openUrl: (id) => ipcRenderer.invoke(CH.openUrl, id),
   linkPreview: (id) => ipcRenderer.invoke(CH.linkPreview, id),
@@ -33,6 +35,7 @@ const api: DesktopApi = {
   getSettings: () => ipcRenderer.invoke(CH.settings),
   updateSettings: (patch) => ipcRenderer.invoke(CH.updateSettings, patch),
   installGnomeShortcut: () => ipcRenderer.invoke(CH.installShortcut),
+  hideWindow: () => ipcRenderer.invoke(CH.hideWindow),
   resetVault: () => ipcRenderer.invoke(CH.resetVault),
   updates: {
     state: () => ipcRenderer.invoke(CH.updateState),

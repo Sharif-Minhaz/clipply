@@ -3,10 +3,11 @@ import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
 
-/** Live, filtered history. Reloads on every change event; out-of-order responses are dropped. */
-export function useClipList(filter: ListFilter): { items: ClipView[] | null; error: Error | null } {
+/** Live, filtered page of history (`offset`/`limit`). Reloads on every change event; out-of-order responses are dropped. */
+export function useClipList(filter: ListFilter): { items: ClipView[] | null; total: number; error: Error | null } {
   const client = useClipply();
   const [items, setItems] = useState<ClipView[] | null>(null);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<Error | null>(null);
   const key = JSON.stringify(filter);
   const latest = useRef(0);
@@ -18,7 +19,8 @@ export function useClipList(filter: ListFilter): { items: ClipView[] | null; err
       client.list(JSON.parse(key) as ListFilter).then(
         (result) => {
           if (alive && ticket === latest.current) {
-            setItems(result);
+            setItems(result.items);
+            setTotal(result.total);
             setError(null);
           }
         },
@@ -35,7 +37,7 @@ export function useClipList(filter: ListFilter): { items: ClipView[] | null; err
     };
   }, [client, key]);
 
-  return { items, error };
+  return { items, total, error };
 }
 
 /** A link item's Open Graph image (as a blob: URL) and title; nothing until loaded or when there is none. */

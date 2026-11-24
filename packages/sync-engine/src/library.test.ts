@@ -1,11 +1,12 @@
 // @vitest-environment node
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createKeyring, fromUtf8, initCrypto, rotateKeyring, utf8, type Keyring } from '@clipply/crypto';
+import { createKeyring, fromUtf8, initCrypto, rotateKeyring, toB64, utf8, type Keyring } from '@clipply/crypto';
+import { EncryptedItem } from '@clipply/shared-schemas';
 import { itemRepo, migrate, outboxRepo, type SqlDb } from '@clipply/database';
 import { openTestDb } from '@clipply/database/testing';
 
 import { classifyText, htmlToText, saveFileName, uuidv7 } from './content';
-import { ClipLibrary, ContentTooLargeError, ItemNotFoundError, MAX_CAPTURE_BYTES } from './library';
+import { ClipLibrary, ContentTooLargeError, fitOcr, ItemNotFoundError, MAX_CAPTURE_BYTES, MAX_OCR_BYTES } from './library';
 import { exportBackup, importBackup } from './backup';
 
 const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
@@ -220,5 +221,63 @@ describe('saveFileName', () => {
     expect(saveFileName({ kind: 'image', mime: 'image/WEBP' })).toBe('image.webp');
     expect(saveFileName({ kind: 'image', mime: 'image/x-unknown' })).toBe('image.png');
     expect(saveFileName({ kind: 'text', mime: 'text/plain' })).toBe('clip.txt');
+  });
+});
+
+describe('text recognition', () => {
+  it('never scans on capture; recognizes on demand, stores the text in the meta and makes it searchable', async () => {
+    const seen: string[] = [];
+    const ocr = new ClipLibrary({
+      db, keyring: () => ring, deviceId: DEVICE, now: () => clock++,
+      recognizeText: async (image, mime) => (seen.push(`${mime}:${image.length}`), '  Invoice   #42\n\n\nTotal  9.99 '),
+    });
+    const { id } = (await ocr.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(1, 2, 3) }))!;
+    expect(seen).toEqual([]);
+    expect(ocr.get(id)?.meta.ocr).toBeUndefined();
+    expect(await ocr.recognize(id)).toBe('Invoice #42\nTotal 9.99');
+    expect(seen).toEqual(['image/png:3']);
+    expect(ocr.get(id)?.meta.ocr).toBe('Invoice #42\nTotal 9.99');
+    expect(ocr.list({ query: 'invoice' }).map((v) => v.id)).toEqual([id]);
+    const text = (await ocr.capture({ type: 'text', text: 'not an image' }))!;
+    await expect(ocr.recognize(text.id)).rejects.toThrow(TypeError);
+  });
+
+  it('a failed scan leaves the item untouched; no text found is stored as empty', async () => {
+    let fail = true;
+    const ocr = new ClipLibrary({
+      db, keyring: () => ring, deviceId: DEVICE, now: () => clock++,
+      recognizeText: async () => {
+        if (fail) throw new Error('engine crashed');
+        return '';
+      },
+    });
+    const { id } = (await ocr.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(7) }))!;
+    await expect(ocr.recognize(id)).rejects.toThrow('engine crashed');
+    expect(ocr.get(id)?.meta.ocr).toBeUndefined();
+    fail = false;
+    expect(await ocr.recognize(id)).toBe('');
+    expect(ocr.get(id)?.meta.ocr).toBe('');
+  });
+
+  it('cuts long text so the sealed meta still fits the wire limit, even with a full title', async () => {
+    const long = 'অক্ষর '.repeat(2000);
+    expect(utf8(JSON.stringify(fitOcr(long))).length - 2).toBeLessThanOrEqual(MAX_OCR_BYTES);
+    const ocr = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, now: () => clock++, recognizeText: async () => long });
+    const { id } = (await ocr.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(4) }))!;
+    await ocr.recognize(id);
+    await ocr.setFlags(id, { title: 'শ'.repeat(200) });
+    const row = (await itemRepo(db).get(id))!;
+    expect(EncryptedItem.shape.meta.safeParse(toB64(row.meta)).success).toBe(true);
+  });
+});
+
+describe('pagination', () => {
+  it('returns one page of matches, newest first, with the total', async () => {
+    for (const t of ['one', 'two', 'three', 'four', 'five']) await lib.capture({ type: 'text', text: t });
+    expect(lib.page({ limit: 2 })).toMatchObject({ total: 5, items: [{ preview: 'five' }, { preview: 'four' }] });
+    expect(lib.page({ offset: 4, limit: 2 }).items.map((v) => v.preview)).toEqual(['one']);
+    expect(lib.page({ offset: 10, limit: 2 })).toEqual({ items: [], total: 5 });
+    // Filters apply before paging, so the total counts matches only.
+    expect(lib.page({ query: 'o', offset: 1, limit: 1 })).toMatchObject({ total: 3, items: [{ preview: 'two' }] });
   });
 });

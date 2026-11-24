@@ -17,6 +17,7 @@ import { HelperClipboardProvider } from './clipboard/helper';
 import { runClipboardHelper } from './clipboard/helperProcess';
 import { DesktopCore, type ClipboardWrite } from './core';
 import { activeAppClasses } from './clipboard/activeApp';
+import { tesseractRecognizer } from './ocr/tesseract';
 import { registerIpc } from './ipc';
 import { defaultScreenshotDir, watchScreenshots } from './screenshot/watcher';
 import type { Settings } from './settings';
@@ -157,11 +158,15 @@ async function main(): Promise<void> {
     });
   };
 
+  const ocr = tesseractRecognizer(import.meta.dirname);
   // The keyring changes when this device joins an account vault or a key rotation arrives.
   let vault = vaultState.status === 'ready' ? vaultState.vault : null;
   let account: AccountController | null = null;
   const library = vault
-    ? new ClipLibrary({ db, keyring: () => vault!.keyring, deviceId: vault.deviceId, fetchBlob: (id) => account!.engine.fetchBlob(id) })
+    ? new ClipLibrary({
+        db, keyring: () => vault!.keyring, deviceId: vault.deviceId, fetchBlob: (id) => account!.engine.fetchBlob(id),
+        recognizeText: ocr.recognize,
+      })
     : null;
   if (library && vault) {
     const env = import.meta.env;
@@ -264,6 +269,7 @@ async function main(): Promise<void> {
     library: () => library,
     status,
     installShortcut,
+    hideWindow: () => win?.hide(),
     chooseBackupFile: async (mode) => {
       const filters = [{ name: 'Clipply backup', extensions: ['clipply'] }];
       if (mode === 'save') {
@@ -380,6 +386,7 @@ async function main(): Promise<void> {
     globalShortcut.unregisterAll();
     screenshotWatch?.close();
     void core?.stop();
+    void ocr.stop();
     tray.destroy();
     db.close();
   });

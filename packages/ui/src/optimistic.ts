@@ -64,6 +64,8 @@ export function optimistic(inner: ClipplyClient): ClipplyClient {
     linkPreview: (id) => inner.linkPreview(id),
     openUrl: (id) => inner.openUrl(id),
     copy: (id) => inner.copy(id),
+    copyText: (text) => inner.copyText(text),
+    recognizeText: (id) => inner.recognizeText(id),
     saveFile: (id) => inner.saveFile(id),
     editText: (id, text) => inner.editText(id, text),
     storage: () => inner.storage(),
@@ -79,14 +81,12 @@ export function optimistic(inner: ClipplyClient): ClipplyClient {
     },
 
     async list(filter) {
-      // Flag overrides can move items in or out of a flag filter, so fetch without it and filter here.
-      const { pinned: _p, favorite: _f, limit, ...rest } = filter;
-      const flagFiltered = filter.pinned !== undefined || filter.favorite !== undefined;
-      const real = await inner.list(flagFiltered && flags.size ? rest : filter);
-      const shown = real.filter((v) => !hidden.has(v.id)).map(overlay).filter((v) => matches(v, filter));
-      const pending = [...adds.values()].map((a) => a.view).filter((v) => matches(v, filter)).reverse();
-      const out = [...pending, ...shown];
-      return limit ? out.slice(0, limit) : out;
+      // Overrides apply to the page the platform returns: deletes and flag changes that leave the filter
+      // drop out, pending adds lead the first page. The next real list (after the call settles) is exact.
+      const real = await inner.list(filter);
+      const shown = real.items.filter((v) => !hidden.has(v.id)).map(overlay).filter((v) => matches(v, filter));
+      const pending = (filter.offset ?? 0) === 0 ? [...adds.values()].map((a) => a.view).filter((v) => matches(v, filter)).reverse() : [];
+      return { items: [...pending, ...shown], total: Math.max(0, real.total - (real.items.length - shown.length) + pending.length) };
     },
 
     async readThumb(id) {

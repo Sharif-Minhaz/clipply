@@ -21,7 +21,11 @@ import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
+import android.graphics.BitmapFactory
 import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import org.json.JSONObject
@@ -193,6 +197,16 @@ class ClipplyNativePlugin : Plugin() {
      * Device pairing QR. Google's code scanner runs in Play services' own screen, so Clipply needs no
      * camera permission and never sees camera frames; only the decoded text comes back.
      */
+    /** On-device OCR (ML Kit via Play services; the model arrives with the app, see the manifest). Latin script. */
+    @PluginMethod
+    fun recognizeText(call: PluginCall) = guard(call) {
+        val bytes = Base64.decode(call.getString("data") ?: return@guard call.reject("data is required"), Base64.DEFAULT)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@guard call.reject("image could not be decoded")
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).process(InputImage.fromBitmap(bitmap, 0))
+            .addOnSuccessListener { call.resolve(JSObject().put("text", it.text)) }
+            .addOnFailureListener { call.reject(it.message ?: "text recognition unavailable", it) }
+    }
+
     @PluginMethod
     fun scanQr(call: PluginCall) {
         val options = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()

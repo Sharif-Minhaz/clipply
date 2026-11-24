@@ -21,6 +21,7 @@ const Filter = z.object({
   pinned: z.boolean().optional(),
   favorite: z.boolean().optional(),
   query: z.string().max(500).optional(),
+  offset: z.number().int().min(0).optional(),
   limit: z.number().int().min(1).max(10_000).optional(),
 }).strict();
 const Flags = z.object({ pinned: z.boolean(), favorite: z.boolean(), title: z.string().max(200) }).partial().strict();
@@ -46,6 +47,7 @@ export interface IpcDeps {
   library: () => ClipLibrary | null;
   status: () => Promise<DesktopStatus>;
   installShortcut: () => Promise<void>;
+  hideWindow: () => void;
   resetVault: () => Promise<void>;
   account: () => AccountController | null;
   updates: UpdateChecker;
@@ -91,10 +93,12 @@ export function registerIpc(d: IpcDeps): void {
     return c;
   };
 
-  handle(CH.list, z.tuple([Filter]), (f) => lib().list(f));
+  handle(CH.list, z.tuple([Filter]), (f) => lib().page(f));
   handle(CH.thumb, z.tuple([Id]), (id) => lib().readThumb(id));
   handle(CH.body, z.tuple([Id]), (id) => lib().readBody(id));
   handle(CH.copy, z.tuple([Id]), (id) => core().copy(id));
+  handle(CH.copyText, z.tuple([Text.min(1)]), (text) => core().copyText(text));
+  handle(CH.recognize, z.tuple([Id]), (id) => lib().recognize(id));
   handle(CH.saveFile, z.tuple([Id]), (id) => core().saveFile(id));
   handle(CH.openUrl, z.tuple([Id]), (id) => core().openUrl(id));
   handle(CH.linkPreview, z.tuple([Id]), (id) => core().linkPreview(id));
@@ -121,6 +125,7 @@ export function registerIpc(d: IpcDeps): void {
   handle(CH.settings, z.tuple([]), () => core().settings);
   handle(CH.updateSettings, z.tuple([SettingsPatch]), (patch) => core().updateSettings(patch));
   handle(CH.installShortcut, z.tuple([]), () => d.installShortcut());
+  handle(CH.hideWindow, z.tuple([]), () => d.hideWindow());
   handle(CH.resetVault, z.tuple([]), () => d.resetVault());
   handle(CH.updateState, z.tuple([]), () => d.updates.state());
   handle(CH.updateCheck, z.tuple([]), () => d.updates.check({ force: true }));

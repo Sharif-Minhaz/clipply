@@ -1,5 +1,5 @@
 import type { ClipKind } from '@clipply/shared-schemas';
-import type { AccountStatus, ClipView, DeviceInfo, LinkPreview, ListFilter, ManualInput, StorageStats, UpdateState } from '@clipply/sync-engine';
+import type { AccountStatus, ClipPage, ClipView, DeviceInfo, LinkPreview, ListFilter, ManualInput, StorageStats, UpdateState } from '@clipply/sync-engine';
 
 import type { Settings, SettingsPatch } from '../main/settings';
 
@@ -9,6 +9,8 @@ export const CH = {
   thumb: 'clips:thumb',
   body: 'clips:body',
   copy: 'clips:copy',
+  copyText: 'clips:copy-text',
+  recognize: 'clips:recognize',
   saveFile: 'clips:save-file',
   openUrl: 'clips:open-url',
   linkPreview: 'clips:link-preview',
@@ -26,6 +28,7 @@ export const CH = {
   settings: 'app:settings',
   updateSettings: 'app:update-settings',
   installShortcut: 'app:install-shortcut',
+  hideWindow: 'app:hide-window',
   resetVault: 'app:reset-vault',
   accountStatus: 'account:status',
   accountChanged: 'account:changed',
@@ -73,10 +76,12 @@ export interface DesktopStatus {
 
 /** Shape of `window.clipply`, exposed by the preload script. */
 export interface DesktopApi {
-  list(filter: ListFilter): Promise<ClipView[]>;
+  list(filter: ListFilter): Promise<ClipPage>;
   readThumb(id: string): Promise<Uint8Array | null>;
   readBody(id: string): Promise<Uint8Array>;
   copy(id: string): Promise<void>;
+  copyText(text: string): Promise<void>;
+  recognizeText(id: string): Promise<string>;
   saveFile(id: string): Promise<boolean>;
   openUrl(id: string): Promise<void>;
   linkPreview(id: string): Promise<LinkPreview | null>;
@@ -95,6 +100,8 @@ export interface DesktopApi {
   getSettings(): Promise<Settings>;
   updateSettings(patch: SettingsPatch): Promise<Settings>;
   installGnomeShortcut(): Promise<void>;
+  /** Hides the window so the app below gets focus back (after picking a clip with the keyboard). */
+  hideWindow(): Promise<void>;
   /** Deletes local history and keys; only offered when the vault cannot be opened. */
   resetVault(): Promise<void>;
   /** Update notices (sync-engine/update.ts) and self-update (main/updater.ts). */

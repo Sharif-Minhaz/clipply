@@ -350,7 +350,7 @@ describe('DesktopCore + IPC', () => {
     const handlers = new Map<string, (e: { senderFrame: { url: string } | null }, ...a: unknown[]) => unknown>();
     registerIpc({
       ipcMain: { handle: (c, l) => void handlers.set(c, l) }, allowedOrigin: 'file://', core: () => core, library: () => library, log,
-      status: async () => ({}) as never, installShortcut: async () => {}, resetVault: async () => {}, account: () => null, chooseBackupFile: async () => null, updates: {} as never, openReleasePage: async () => {}, installUpdate: async () => {},
+      status: async () => ({}) as never, installShortcut: async () => {}, hideWindow: () => {}, resetVault: async () => {}, account: () => null, chooseBackupFile: async () => null, updates: {} as never, openReleasePage: async () => {}, installUpdate: async () => {},
     });
     const add = (input: unknown) => handlers.get('clips:add')!({ senderFrame: { url: 'file:///app' } }, input);
     expect(await add({ type: 'text', text: 'typed note' })).toEqual({ duplicate: false });
@@ -371,14 +371,14 @@ describe('DesktopCore + IPC', () => {
     const ipcMain: IpcMainLike = { handle: (c, l) => void handlers.set(c, l) };
     registerIpc({
       ipcMain, allowedOrigin: 'file://', core: () => core, library: () => library, log,
-      status: async () => ({}) as never, installShortcut: async () => {}, resetVault: async () => {}, account: () => null, chooseBackupFile: async () => null, updates: {} as never, openReleasePage: async () => {}, installUpdate: async () => {},
+      status: async () => ({}) as never, installShortcut: async () => {}, hideWindow: () => {}, resetVault: async () => {}, account: () => null, chooseBackupFile: async () => null, updates: {} as never, openReleasePage: async () => {}, installUpdate: async () => {},
     });
     const list = handlers.get('clips:list')!;
     await expect(list({ senderFrame: { url: 'https://evil.test' } }, {})).rejects.toThrow('untrusted sender');
     await expect(list({ senderFrame: null }, {})).rejects.toThrow('untrusted sender');
     await expect(list({ senderFrame: { url: 'file:///app/index.html' } }, { evil: 1 })).rejects.toThrow(/invalid arguments/);
     await expect(handlers.get('clips:body')!({ senderFrame: { url: 'file:///x' } }, 'not-a-uuid')).rejects.toThrow(/invalid arguments/);
-    expect(await list({ senderFrame: { url: 'file:///app/index.html' } }, {})).toEqual([]);
+    expect(await list({ senderFrame: { url: 'file:///app/index.html' } }, {})).toEqual({ items: [], total: 0 });
     await expect(handlers.get('clips:body')!({ senderFrame: { url: 'file:///x' } }, uuidv7())).rejects.toThrow(/ItemNotFoundError/);
   });
 });

@@ -121,6 +121,12 @@ export class DesktopCore {
     await this.deps.provider.markCurrentAsSeen();
   }
 
+  /** Plain text the user asked to copy (joined clips, recognized text); like `copy`, it is not re-captured. */
+  async copyText(text: string): Promise<void> {
+    await this.deps.writeClipboard({ text });
+    await this.deps.provider.markCurrentAsSeen();
+  }
+
   /** Preview for a link item; null when turned off in settings or the item is not a link. */
   async linkPreview(id: string): Promise<LinkPreview | null> {
     const view = this.deps.library.get(id);

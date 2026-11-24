@@ -52,6 +52,7 @@ The vault keyring and device private keys are wrapped with a non-exportable AES-
 | Background upload | `UploadWorker` + `ItemCrypto.kt` | Unique, network-constrained, exponential backoff; text only; Tink XChaCha20-Poly1305 + BouncyCastle BLAKE2b, unit-tested against `packages/crypto/vectors/item-v1.json` |
 | Copy image to clipboard | `ClipImageProvider` | serves bytes from memory via a pipe — no plaintext image file |
 | Blob transfer | plugin `uploadBlob` / `downloadBlob` | native HTTP, ciphertext only |
+| Text in images (OCR) | plugin `recognizeText` | ML Kit text recognition through Play services (`play-services-mlkit-text-recognition`, Latin script); the model is requested at install via the `com.google.mlkit.vision.DEPENDENCIES` meta-data (`ocr`). Runs only when the user presses **Copy text** in the image viewer (`ClipLibrary.recognize`). Needs Play services; without them, recognition fails and is logged. |
 | Backup / Save file | plugin `saveDocument` / `openDocument` | Storage Access Framework pickers: the user chooses the location; no storage permission |
 
 Token sharing: the worker may rotate the refresh token; `AccountController` re-reads the stored session before refreshing so the two never replay each other's token.

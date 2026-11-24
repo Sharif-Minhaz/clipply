@@ -99,7 +99,7 @@ export function App() {
 function HistoryScreen({ base, empty, grid }: { base: ListFilter; empty: string; grid?: boolean }) {
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<ClipKind[]>([]);
-  const [open, setOpen] = useState<ClipView | null>(null);
+  const [open, setOpen] = useState<{ item: ClipView; action: 'scan' | undefined } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -108,19 +108,37 @@ function HistoryScreen({ base, empty, grid }: { base: ListFilter; empty: string;
         e.preventDefault();
         searchRef.current?.focus();
       }
+      // Ctrl+F from anywhere except an open viewer (its editor keeps the keys).
+      if (e.key.toLowerCase() === 'f' && (e.ctrlKey || e.metaKey) && !e.altKey && !document.querySelector('[role="dialog"]')) {
+        e.preventDefault();
+        searchRef.current?.select();
+      }
+      // Type to search, Enter copies the best match and hides the window (the clip's button sees a keyboard click).
+      if (e.key === 'Enter' && document.activeElement === searchRef.current) {
+        e.preventDefault();
+        document.querySelector<HTMLElement>('[data-clip-primary]')?.click();
+      }
+    };
+    // Opened with the global shortcut: ready to type at once, unless something else already has focus.
+    const onFocus = (): void => {
+      if (document.activeElement === document.body) searchRef.current?.select();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   const filter: ListFilter = { ...base, ...(query ? { query } : {}), ...(kinds.length ? { kinds } : {}) };
   return (
     <div className="pb-8">
-      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} action={<SyncButton account={window.clipply.account} />} {...(base.kinds ? { kindOptions: base.kinds } : {})} />
+      <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} searchShortcut="Ctrl F" action={<SyncButton account={window.clipply.account} />} {...(base.kinds ? { kindOptions: base.kinds } : {})} />
       <div className={`mx-auto px-6 pt-2 ${grid ? 'max-w-6xl' : 'max-w-[calc(48rem+3rem)]'}`}>
-        <ClipList filter={filter} onOpen={setOpen} emptyText={empty} deviceNames={{}} layout={grid ? 'grid' : 'list'} />
+        <ClipList filter={filter} onOpen={(item, action) => setOpen({ item, action })} emptyText={empty} deviceNames={{}} layout={grid ? 'grid' : 'list'} onPick={() => void window.clipply.hideWindow()} />
       </div>
-      {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
+      {open && <ItemViewer item={open.item} action={open.action} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && <AddClip />}
     </div>
   );

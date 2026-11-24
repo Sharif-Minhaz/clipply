@@ -75,7 +75,7 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
   const { hint } = TABS[tab]!;
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<ClipKind[]>([]);
-  const [open, setOpen] = useState<ClipView | null>(null);
+  const [open, setOpen] = useState<{ item: ClipView; action: 'scan' | undefined } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const filter: ListFilter = { ...base, ...(query ? { query } : {}), ...(kinds.length ? { kinds } : {}) };
 
@@ -103,9 +103,9 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
     />
     <div className="space-y-2.5 px-3 pt-2.5 pb-24">
       {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} />}
-      <ClipList filter={filter} onOpen={setOpen} emptyText={empty} layout={grid ? 'grid' : 'list'} />
+      <ClipList filter={filter} onOpen={(item, action) => setOpen({ item, action })} emptyText={empty} layout={grid ? 'grid' : 'list'} pageSize={50} />
     </div>
-      {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}
+      {open && <ItemViewer item={open.item} action={open.action} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (
         <AddClip
           dial

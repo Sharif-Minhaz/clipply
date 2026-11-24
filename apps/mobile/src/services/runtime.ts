@@ -109,7 +109,10 @@ export async function boot(): Promise<Runtime> {
   const appVersion = await CapApp.getInfo().then((i) => i.version, () => '0.0.0');
 
   let controller: AccountController | null = null;
-  const library = new ClipLibrary({ db, keyring: () => vault.keyring, deviceId: vault.deviceId, fetchBlob: (id) => controller!.engine.fetchBlob(id) });
+  const library = new ClipLibrary({
+    db, keyring: () => vault.keyring, deviceId: vault.deviceId, fetchBlob: (id) => controller!.engine.fetchBlob(id),
+    recognizeText: async (image) => (await ClipplyNative.recognizeText({ data: bytesToB64(image) })).text,
+  });
   await library.load();
 
   const apiUrl = import.meta.env.VITE_API_URL as string | undefined;
@@ -283,7 +286,7 @@ export async function boot(): Promise<Runtime> {
 
   const previewer = new LinkPreviewer(previewGet);
   const client: ClipplyClient = {
-    list: async (f) => library.list(f),
+    list: async (f) => library.page(f),
     subscribe: (cb) => library.subscribe(cb),
     readThumb: (id) => library.readThumb(id),
     readBody: (id) => library.readBody(id),
@@ -306,6 +309,11 @@ export async function boot(): Promise<Runtime> {
         await ClipplyNative.writeClipboardText({ text: lastSelfWrite });
       }
     },
+    copyText: async (text) => {
+      lastSelfWrite = text;
+      await ClipplyNative.writeClipboardText({ text });
+    },
+    recognizeText: (id) => library.recognize(id),
     saveFile: async (id) => {
       const v = library.get(id);
       if (!v) throw new Error('item not found');

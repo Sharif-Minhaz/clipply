@@ -1,5 +1,5 @@
-import { useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
-import { Check, CheckSquare, Code, Copy, Download, File, Maximize2, Image, Link, Pilcrow, Search, Square, Star, StarOff, Trash, Type, X, type LucideProps } from 'lucide-react';
+import { useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { Check, CheckSquare, ChevronLeft, ChevronRight, Code, Copy, Download, File, Maximize2, Image, Link, Pilcrow, ScanText, Search, Square, Star, StarOff, Trash, Type, X, type LucideProps } from 'lucide-react';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -25,7 +25,8 @@ export const KIND_ICON: Record<ClipKind, ComponentType<LucideProps>> = {
   text: Type, url: Link, code: Code, html: Pilcrow, image: Image, file: File,
 };
 
-export function SearchBar({ value, onChange, inputRef }: { value: string; onChange: (v: string) => void; inputRef?: React.Ref<HTMLInputElement> }) {
+/** `shortcut`: key hint shown in the empty field (desktop), e.g. "Ctrl F". */
+export function SearchBar({ value, onChange, inputRef, shortcut }: { value: string; onChange: (v: string) => void; inputRef?: React.Ref<HTMLInputElement>; shortcut?: string | undefined }) {
   return (
     <label className="flex items-center gap-2.5 rounded-full bg-raised px-4 py-3 shadow-[0_6px_20px_-12px_rgb(8_60_70/0.45)] ring-1 ring-line/70 focus-within:ring-2 focus-within:ring-accent in-data-hero:gap-2 in-data-hero:bg-white/12 in-data-hero:px-3.5 in-data-hero:py-2 in-data-hero:shadow-none in-data-hero:ring-white/20 in-data-hero:backdrop-blur in-data-hero:focus-within:ring-white/70">
       <Search aria-hidden className="size-5 shrink-0 text-muted in-data-hero:size-4.5 in-data-hero:text-white/80" />
@@ -36,8 +37,19 @@ export function SearchBar({ value, onChange, inputRef }: { value: string; onChan
         placeholder="Search your clips"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowDown') return;
+          const first = document.querySelector<HTMLElement>('[data-clip-primary]');
+          if (first) {
+            e.preventDefault();
+            first.focus();
+          }
+        }}
         className="w-full bg-transparent text-base text-ink placeholder:text-muted focus:outline-none in-data-hero:text-white in-data-hero:placeholder:text-white/75"
       />
+      {shortcut && !value && (
+        <kbd aria-hidden className="hidden shrink-0 rounded-md px-1.5 py-0.5 font-sans text-xs whitespace-nowrap text-muted ring-1 ring-line sm:inline in-data-hero:text-white/75 in-data-hero:ring-white/30">{shortcut}</kbd>
+      )}
     </label>
   );
 }
@@ -84,6 +96,8 @@ export function KindFilter({ value, onChange, options }: { value: readonly ClipK
 export function SearchStrip(props: {
   query: string; onQuery: (v: string) => void; kinds: readonly ClipKind[]; onKinds: (v: ClipKind[]) => void;
   inputRef?: React.Ref<HTMLInputElement>;
+  /** Key hint in the empty search field (desktop). */
+  searchShortcut?: string;
   /** Shown beside the search field (the sync button). */
   action?: ReactNode;
   hero?: boolean;
@@ -104,7 +118,7 @@ export function SearchStrip(props: {
         {/* h-9 + the pt-3 above = the 3rem the hero header sticks above the top (-top-12). */}
         {props.heading && <div className="flex h-9 items-center">{props.heading}</div>}
         <div className="flex gap-2">
-          <div className="min-w-0 flex-1"><SearchBar value={props.query} onChange={props.onQuery} {...(props.inputRef ? { inputRef: props.inputRef } : {})} /></div>
+          <div className="min-w-0 flex-1"><SearchBar value={props.query} onChange={props.onQuery} shortcut={props.searchShortcut} {...(props.inputRef ? { inputRef: props.inputRef } : {})} /></div>
           {props.action}
         </div>
         <KindFilter value={props.kinds} onChange={props.onKinds} options={props.kindOptions} />
@@ -117,13 +131,16 @@ interface CardProps {
   item: ClipView;
   now: number;
   deviceName?: string | undefined;
-  onOpen?: ((item: ClipView) => void) | undefined;
+  /** `scan`: open an image and start copying its text at once (the card's scan button). */
+  onOpen?: ((item: ClipView, action?: 'scan') => void) | undefined;
   /** Set while the list is in selection mode: clicking the card toggles it. */
   selected?: boolean | undefined;
   onSelect?: (() => void) | undefined;
+  /** Called after a copy started from the keyboard (Enter/Space), e.g. to hide the desktop window for pasting. */
+  onPick?: (() => void) | undefined;
 }
 
-export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: CardProps) {
+export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect, onPick }: CardProps) {
   const client = useClipply();
   const { meta } = item;
   const KindIcon = KIND_ICON[meta.kind];
@@ -156,6 +173,14 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
     } finally {
       setBusy(false);
     }
+  };
+  // `detail` is 0 when Enter/Space (not a pointer) clicked the button.
+  const pick = (e: MouseEvent<HTMLButtonElement>): void => {
+    const byKeyboard = e.detail === 0;
+    void act(async () => {
+      await primary();
+      if (byKeyboard && !isFile) onPick?.();
+    })();
   };
 
   return (
@@ -195,12 +220,13 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
 
       <button
         type="button"
-        onClick={onSelect ?? act(primary)}
+        data-clip-primary
+        onClick={onSelect ?? pick}
         disabled={(busy || pending) && !onSelect}
         {...(onSelect ? { 'aria-pressed': !!selected } : {})}
         title={onSelect ? undefined : isFile ? 'Click to save' : 'Click to copy'}
         aria-label={`${onSelect ? 'Select' : isFile ? 'Save' : 'Copy'} ${KIND_LABEL[meta.kind].toLowerCase()} item`}
-        className="col-span-2 block w-full cursor-pointer rounded-lg py-1 text-left disabled:cursor-default sm:col-span-1 sm:col-start-2"
+        className="col-span-2 block w-full min-w-0 cursor-pointer scroll-mt-48 scroll-mb-6 rounded-lg py-1 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent disabled:cursor-default sm:col-span-1 sm:col-start-2"
       >
         {meta.kind === 'image' ? (
           thumb ? (
@@ -227,12 +253,13 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect }: 
 
       {!onSelect && !pending && <footer className="col-span-2 -ml-2 flex items-center gap-0.5 sm:col-span-1 sm:col-start-2">
         {meta.kind === 'image' && <IconButton icon={Download} label="Save" disabled={busy} onClick={act(async () => void (await client.saveFile(item.id)))} />}
+        {meta.kind === 'image' && onOpen && <IconButton icon={ScanText} label="Copy text from image" disabled={busy} onClick={() => onOpen(item, 'scan')} />}
         <IconButton icon={Star} label={fav ? 'Unfavorite' : 'Favorite'} pressed={fav} disabled={busy} onClick={act(() => client.setFlags(item.id, favoriteFlags(!fav)))} />
         <IconButton icon={Trash} label="Delete" danger disabled={busy} onClick={act(() => client.remove([item.id]))} />
         <button
           type="button"
           disabled={busy}
-          onClick={act(primary)}
+          onClick={pick}
           className="ml-auto flex items-center gap-1.5 rounded-full bg-(--kind)/12 px-4 py-2 text-sm font-semibold max-sm:gap-1 max-sm:px-3 max-sm:py-1.5 max-sm:text-[0.8125rem] text-(--kind) transition-colors hover:bg-(--kind)/20 disabled:opacity-50"
         >
           {isFile ? <Download aria-hidden className="size-4 max-sm:size-3.5" /> : <Copy aria-hidden className="size-4 max-sm:size-3.5" />}
@@ -269,20 +296,68 @@ export function IconButton(props: {
   );
 }
 
+const TEXT_KINDS: ReadonlySet<ClipKind> = new Set(['text', 'url', 'code', 'html']);
+
+/** Plain text of copied HTML. DOMParser builds an inert document: no scripts run, nothing loads. */
+function htmlText(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style').forEach((el) => el.remove());
+  return (doc.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Arrow keys move between clips (Up from the first one returns to the search field); Enter/Space then
+ * act on the focused clip, as its main button does. In the grid, Left/Right step and Up/Down skip a row.
+ */
+function moveFocus(e: KeyboardEvent<HTMLElement>, grid: boolean): void {
+  if (e.altKey || e.ctrlKey || e.metaKey || !['ArrowDown', 'ArrowUp', ...(grid ? ['ArrowLeft', 'ArrowRight'] : [])].includes(e.key)) return;
+  const all = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-clip-primary]')];
+  const at = all.findIndex((el) => el.closest('li')?.contains(document.activeElement));
+  if (at < 0) return;
+  e.preventDefault();
+  const rowTop = (el: HTMLElement): number => el.closest('li')!.offsetTop;
+  const cols = grid ? Math.max(1, all.filter((el) => rowTop(el) === rowTop(all[0]!)).length) : 1;
+  const step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' ? -cols : cols;
+  const next = at + step;
+  if (next < 0) document.querySelector<HTMLElement>('input[type="search"]')?.focus();
+  else all[Math.min(next, all.length - 1)]?.focus();
+}
+
 export function ClipList(props: {
   filter: ListFilter;
   deviceNames?: Record<string, string>;
   now?: number;
-  onOpen?: (item: ClipView) => void;
+  onOpen?: (item: ClipView, action?: 'scan') => void;
   emptyText?: string;
   /** `grid`: a gallery of tiles (the Media tab). */
   layout?: 'list' | 'grid';
+  /** See ClipCard `onPick`. */
+  onPick?: () => void;
+  /** Clips per page; only that page is fetched from the platform. */
+  pageSize?: number;
 }) {
-  const { filter, deviceNames = {}, now = Date.now(), onOpen, layout = 'list' } = props;
+  const { filter, deviceNames = {}, now = Date.now(), onOpen, layout = 'list', onPick, pageSize = 100 } = props;
   const client = useClipply();
-  const { items, error } = useClipList(filter);
+  const [page, setPage] = useState(0);
+  // A new search or filter starts again at the first page.
+  const filterKey = JSON.stringify(filter);
+  const [pageFor, setPageFor] = useState(filterKey);
+  if (pageFor !== filterKey) {
+    setPageFor(filterKey);
+    setPage(0);
+  }
+  const { items, total, error } = useClipList({ ...filter, offset: page * pageSize, limit: pageSize });
+  const listRef = useRef<HTMLDivElement>(null);
   // null = normal mode; a set = selection mode (bulk favorite / unfavorite / delete).
   const [selected, setSelected] = useState<ReadonlySet<string> | null>(null);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  // Deleting the last clips of the last page moves back to the page that still has some.
+  if (items && page > 0 && page >= pages) setPage(pages - 1);
+  const goTo = (p: number): void => {
+    setPage(p);
+    setSelected((s) => (s ? new Set() : s));
+    listRef.current?.closest('main')?.scrollTo({ top: 0 });
+  };
   if (error) return <p role="alert" className="p-4 text-sm text-danger">Could not load history: {error.message}</p>;
   if (!items) {
     return (
@@ -297,7 +372,7 @@ export function ClipList(props: {
       </div>
     );
   }
-  if (items.length === 0) {
+  if (items.length === 0 && page === 0) {
     return <p className="mx-auto max-w-sm py-16 text-center text-base text-muted">{filter.query ? `Nothing matches “${filter.query}”.` : props.emptyText ?? 'Nothing copied yet.'}</p>;
   }
   const visible = selected ? [...selected].filter((id) => items.some((i) => i.id === id)) : [];
@@ -308,13 +383,24 @@ export function ClipList(props: {
       return next;
     });
   const bulk = (fn: (ids: string[]) => Promise<unknown>) => (): void => void fn(visible).then(() => setSelected(null));
+  const textIds = visible.filter((id) => TEXT_KINDS.has(items.find((i) => i.id === id)!.meta.kind));
+  // In the order they were picked, one per line; images and files are left out.
+  const copySelected = async (ids: string[]): Promise<void> => {
+    const texts: string[] = [];
+    for (const id of ids) {
+      const body = new TextDecoder().decode(await client.readBody(id));
+      texts.push(items.find((i) => i.id === id)?.meta.kind === 'html' ? htmlText(body) : body.trimEnd());
+    }
+    await client.copyText(texts.join('\n'));
+  };
   return (
-    <div className="space-y-2">
-      <div role="toolbar" aria-label="Selection" className="flex min-h-9 items-center gap-1 text-sm text-muted">
+    <div ref={listRef} className="space-y-2" onKeyDown={(e) => moveFocus(e, layout === 'grid')}>
+      <div role="toolbar" aria-label="Selection" className="flex min-h-9 flex-wrap items-center gap-1 text-sm text-muted">
         {selected ? (
           <>
             <span className="mr-auto font-semibold text-ink">{visible.length} selected</span>
-            <IconButton icon={CheckSquare} label="Select all" onClick={() => setSelected(new Set(items.map((i) => i.id)))} />
+            <IconButton icon={CheckSquare} label={pages > 1 ? 'Select all on this page' : 'Select all'} onClick={() => setSelected(new Set(items.map((i) => i.id)))} />
+            <IconButton icon={Copy} label={`Copy ${textIds.length} as text`} disabled={!textIds.length} onClick={bulk(() => copySelected(textIds))} />
             <IconButton icon={Star} label="Favorite selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, favoriteFlags(true)))))} />
             <IconButton icon={StarOff} label="Unfavorite selected" disabled={!visible.length} onClick={bulk((ids) => Promise.all(ids.map((id) => client.setFlags(id, favoriteFlags(false)))))} />
             <IconButton
@@ -343,12 +429,25 @@ export function ClipList(props: {
           {items.map((item) => (
             <li key={item.id}>
               <ClipCard
-                item={item} now={now} deviceName={deviceNames[item.meta.originDeviceId]} onOpen={onOpen}
+                item={item} now={now} deviceName={deviceNames[item.meta.originDeviceId]} onOpen={onOpen} onPick={onPick}
                 {...(selected ? { selected: selected.has(item.id), onSelect: () => toggle(item.id) } : {})}
               />
             </li>
           ))}
         </ul>
+      )}
+      {pages > 1 && (
+        <nav aria-label="Pages" className="flex flex-wrap items-center justify-center gap-2 pt-3 text-sm text-muted">
+          <button type="button" disabled={page === 0} onClick={() => goTo(page - 1)} className="flex items-center gap-1 rounded-full bg-raised py-1.5 pr-3.5 pl-2.5 font-medium ring-1 ring-line hover:text-ink disabled:opacity-40">
+            <ChevronLeft aria-hidden className="size-4" /> Previous
+          </button>
+          <span aria-live="polite" className="px-1 tabular-nums">
+            {page * pageSize + 1}–{Math.min(total, (page + 1) * pageSize)} of {total}
+          </span>
+          <button type="button" disabled={page >= pages - 1} onClick={() => goTo(page + 1)} className="flex items-center gap-1 rounded-full bg-raised py-1.5 pr-2.5 pl-3.5 font-medium ring-1 ring-line hover:text-ink disabled:opacity-40">
+            Next <ChevronRight aria-hidden className="size-4" />
+          </button>
+        </nav>
       )}
     </div>
   );
@@ -401,9 +500,10 @@ export function MediaTile({ item, now, onOpen, selected, onSelect }: Omit<CardPr
         onClick={onSelect ?? open}
         disabled={pending && !onSelect}
         {...(onSelect ? { 'aria-pressed': !!selected } : {})}
+        data-clip-primary
         aria-label={`${onSelect ? 'Select' : 'Open'} ${name}`}
         title={name}
-        className="block w-full cursor-pointer text-left"
+        className="block w-full cursor-pointer scroll-mt-48 scroll-mb-6 rounded-t-2xl text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
       >
         <div className="flex aspect-square items-center justify-center bg-surface">
           {thumb ? (

@@ -33,7 +33,11 @@ class FakeLibrary {
   client(copy = vi.fn(async () => {})): ClipplyClient {
     const emit = (): void => this.listeners.forEach((l) => l());
     return {
-      list: async (f) => this.list(f),
+      list: async (f) => {
+        const all = this.list(f);
+        const from = f.offset ?? 0;
+        return { items: f.limit ? all.slice(from, from + f.limit) : all.slice(from), total: all.length };
+      },
       subscribe: (cb) => {
         this.listeners.add(cb);
         return () => this.listeners.delete(cb);
@@ -46,6 +50,8 @@ class FakeLibrary {
         emit();
       },
       copy,
+      copyText: vi.fn(async () => {}),
+      recognizeText: vi.fn(async () => ''),
       setFlags: async (id, flags) => {
         this.items = this.items.map((i) => (i.id === id ? { ...i, meta: { ...i.meta, ...flags } } : i));
         emit();
@@ -173,24 +179,28 @@ describe('shared UI', () => {
     const client = optimistic({ ...base, add: () => slowAdd.promise, remove: () => slowRemove.promise, setFlags: () => slowFlags.promise });
 
     const adding = client.add({ type: 'text', text: 'https://example.com' });
-    const [first] = await client.list({});
+    const [first] = (await client.list({})).items;
     expect(first).toMatchObject({ preview: 'https://example.com', meta: { kind: 'url' } });
-    expect(await client.list({ kinds: ['text'] })).toHaveLength(1);
+    expect(await client.list({})).toMatchObject({ total: 3 });
+    expect((await client.list({ kinds: ['text'] })).items).toHaveLength(1);
+    // Pending adds lead only the first page.
+    expect((await client.list({ offset: 1, limit: 5 })).items.map((v) => v.id)).toEqual(['a']);
     slowAdd.reject(new Error('offline'));
     await expect(adding).rejects.toThrow('offline');
-    expect((await client.list({})).map((v) => v.id)).toEqual(['b', 'a']);
+    expect((await client.list({})).items.map((v) => v.id)).toEqual(['b', 'a']);
 
     const removing = client.remove(['a']);
-    expect((await client.list({})).map((v) => v.id)).toEqual(['b']);
+    expect((await client.list({})).items.map((v) => v.id)).toEqual(['b']);
     slowRemove.reject(new Error('locked'));
     await expect(removing).rejects.toThrow('locked');
-    expect((await client.list({})).map((v) => v.id)).toEqual(['b', 'a']);
+    expect((await client.list({})).items.map((v) => v.id)).toEqual(['b', 'a']);
 
-    const starring = client.setFlags('a', { favorite: true });
-    expect((await client.list({ favorite: true })).map((v) => v.id)).toEqual(['a']);
+    await base.setFlags('a', { favorite: true });
+    const unstarring = client.setFlags('a', { favorite: false });
+    expect((await client.list({ favorite: true })).items).toEqual([]);
     slowFlags.reject(new Error('nope'));
-    await expect(starring).rejects.toThrow('nope');
-    expect(await client.list({ favorite: true })).toEqual([]);
+    await expect(unstarring).rejects.toThrow('nope');
+    expect((await client.list({ favorite: true })).items.map((v) => v.id)).toEqual(['a']);
   });
 
   it('lists a typed note before the platform finishes storing it', async () => {
@@ -388,4 +398,151 @@ describe('shared UI', () => {
     expect(formatRelative(0, 3 * 3_600_000, 'en')).toBe('3 hours ago');
     expect(formatRelative(0, 86_400_000, 'en')).toBe('yesterday');
   });
+});
+
+describe('keyboard, transforms and image text', () => {
+  it('moves through clips with the arrow keys; Enter copies and picks, a mouse copy does not pick', async () => {
+    const user = userEvent.setup();
+    const copy = vi.fn(async () => {});
+    const onPick = vi.fn();
+    render(<ClipplyProvider client={lib.client(copy)}><SearchBar value="" onChange={() => {}} /><ClipList filter={{}} onPick={onPick} /></ClipplyProvider>);
+    await screen.findAllByRole('article');
+    await user.click(screen.getByLabelText('Search clipboard history'));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Copy link item' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Copy text item' }));
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
+    expect(copy).toHaveBeenCalledWith('a');
+    await user.keyboard('{ArrowUp}{ArrowUp}');
+    expect(document.activeElement).toBe(screen.getByLabelText('Search clipboard history'));
+    await user.click(screen.getByRole('button', { name: 'Copy link item' }));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith('b'));
+    expect(onPick).toHaveBeenCalledTimes(1);
+  });
+
+  it('copies selected text clips as one, in the order they were picked', async () => {
+    const user = userEvent.setup();
+    const copyText = vi.fn(async () => {});
+    render(<ClipplyProvider client={{ ...lib.client(), copyText }}><ClipList filter={{}} /></ClipplyProvider>);
+    await screen.findAllByRole('article');
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    await user.click(screen.getByRole('button', { name: 'Select text item' }));
+    await user.click(screen.getByRole('button', { name: 'Select link item' }));
+    await user.click(screen.getByRole('button', { name: 'Copy 2 as text' }));
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith('grocery list\nhttps://clipply.dev'));
+  });
+
+  it('transforms text into the editor, then saves it', async () => {
+    const user = userEvent.setup();
+    const item = lib.list().find((i) => i.id === 'a')!;
+    render(<ClipplyProvider client={lib.client()}><ItemViewer item={item} onClose={() => {}} /></ClipplyProvider>);
+    await user.selectOptions(await screen.findByLabelText('Transform text'), 'upper');
+    expect((screen.getByLabelText('Edit text') as HTMLTextAreaElement).value).toBe('GROCERY LIST');
+    await user.selectOptions(screen.getByLabelText('Transform text'), 'json');
+    expect(screen.getByRole('alert').textContent).toBe('This is not valid JSON.');
+    await user.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(lib.list().find((i) => i.id === 'a')?.preview).toBe('GROCERY LIST'));
+  });
+
+  it('scans an image only when Copy text is pressed, shows the scan, then copies the text', async () => {
+    const user = userEvent.setup();
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    lib.add('img', '', 'image', Date.now());
+    const copyText = vi.fn(async () => {});
+    let finish!: (t: string) => void;
+    const recognizeText = vi.fn(() => new Promise<string>((r) => (finish = r)));
+    const item = lib.list().find((i) => i.id === 'img')!;
+    render(<ClipplyProvider client={{ ...lib.client(), copyText, recognizeText }}><ItemViewer item={item} onClose={() => {}} /></ClipplyProvider>);
+    const button = await screen.findByRole('button', { name: /Copy text/ });
+    expect(recognizeText).not.toHaveBeenCalled();
+    await user.click(button);
+    expect(screen.getByRole('status').textContent).toContain('Scanning for text');
+    expect(recognizeText).toHaveBeenCalledWith('img');
+    finish('Total 9.99');
+    const editor = await screen.findByDisplayValue('Total 9.99');
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith('Total 9.99'));
+    expect(screen.queryByText(/Scanning for text/)).toBeNull();
+    // The text can be edited before copying again; that does not scan again.
+    await user.clear(editor);
+    await user.type(editor, 'Total: 9.99 EUR');
+    await user.click(screen.getByRole('button', { name: /Copied|Copy text/ }));
+    expect(recognizeText).toHaveBeenCalledTimes(1);
+    expect(copyText).toHaveBeenLastCalledWith('Total: 9.99 EUR');
+    // Close hides the text; Copy text brings it back with the edit kept.
+    await user.click(screen.getByRole('button', { name: 'Close text' }));
+    expect(screen.queryByLabelText('Recognized text')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Copied|Copy text/ }));
+    expect(screen.getByDisplayValue('Total: 9.99 EUR')).toBeTruthy();
+  });
+
+  it('the card scan button opens the image and starts copying its text at once', async () => {
+    const user = userEvent.setup();
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    lib.add('img', '', 'image', Date.now());
+    const copyText = vi.fn(async () => {});
+    const recognizeText = vi.fn(async () => 'Total 9.99');
+    const client = { ...lib.client(), copyText, recognizeText };
+    function Screen2() {
+      const [open, setOpen] = useState<{ item: ClipView; action: 'scan' | undefined } | null>(null);
+      return (
+        <>
+          <ClipList filter={{}} onOpen={(item, action) => setOpen({ item, action })} />
+          {open && <ItemViewer item={open.item} action={open.action} onClose={() => setOpen(null)} />}
+        </>
+      );
+    }
+    render(<ClipplyProvider client={client}><Screen2 /></ClipplyProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Copy text from image' }));
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith('Total 9.99'));
+    expect(recognizeText).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: 'Image item' })).toBeTruthy();
+  });
+
+
+  it('pages through history, fetching one page at a time; a new search starts at page one', async () => {
+    const user = userEvent.setup();
+    lib.add('c', 'third note', 'text', Date.now() - 10_000);
+    const base = lib.client();
+    const list = vi.fn(base.list);
+    function Paged() {
+      const [query, setQuery] = useState('');
+      return (
+        <>
+          <SearchBar value={query} onChange={setQuery} />
+          <ClipList filter={query ? { query } : {}} pageSize={2} />
+        </>
+      );
+    }
+    render(<ClipplyProvider client={{ ...base, list }}><Paged /></ClipplyProvider>);
+    expect(await screen.findAllByRole('article')).toHaveLength(2);
+    expect(screen.getByText('1–2 of 3')).toBeTruthy();
+    expect(list).toHaveBeenLastCalledWith({ offset: 0, limit: 2 });
+    expect((screen.getByRole('button', { name: /Previous/ }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: /Next/ }));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    expect(screen.getByText('3–3 of 3')).toBeTruthy();
+    expect(list).toHaveBeenLastCalledWith({ offset: 2, limit: 2 });
+    await user.type(screen.getByLabelText('Search clipboard history'), 'note');
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ query: 'note', offset: 0, limit: 2 }));
+    // One match fits on one page: no pager.
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Pages' })).toBeNull());
+  });
+
+
+  it('shows the search shortcut hint only while the field is empty', async () => {
+    const user = userEvent.setup();
+    function Search() {
+      const [q, setQ] = useState('');
+      return <SearchBar value={q} onChange={setQ} shortcut="Ctrl F" />;
+    }
+    render(<Search />);
+    expect(screen.getByText('Ctrl F')).toBeTruthy();
+    await user.type(screen.getByLabelText('Search clipboard history'), 'x');
+    expect(screen.queryByText('Ctrl F')).toBeNull();
+  });
+
 });

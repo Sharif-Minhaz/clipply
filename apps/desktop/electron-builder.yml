@@ -9,6 +9,9 @@ files:
   - out/**
   - resources/icon.png
   - package.json
+# The OCR worker thread and its .wasm/traineddata must be real files (ocr/tesseract.ts).
+asarUnpack:
+  - out/main/**
 linux:
   target: [AppImage, deb]
   category: Utility

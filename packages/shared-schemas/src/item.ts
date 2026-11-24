@@ -29,6 +29,8 @@ export const ItemMeta = z.object({
   favorite: z.boolean(),
   pinned: z.boolean(),
   file: z.object({ name: z.string().max(255) }).optional(),
+  /** Text recognized in an image on the capturing device ('' = none found), trimmed to fit the meta budget. */
+  ocr: z.string().max(1500).optional(),
 });
 export type ItemMeta = z.infer<typeof ItemMeta>;
 

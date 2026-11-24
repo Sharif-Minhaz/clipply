@@ -34,6 +34,12 @@
   --text-xs--line-height: 1.4;
   --text-sm: 0.9375rem;
   --text-sm--line-height: 1.5;
+  /* The OCR scan band in the image viewer. */
+  --animate-scan: scan 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  @keyframes scan {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(100%); }
+  }
 }
 
 /*

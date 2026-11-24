@@ -59,7 +59,15 @@ export interface ListFilter {
   /** Pinned is retired in the UI; a pinned item counts as a favorite. */
   favorite?: boolean;
   query?: string;
+  /** Pagination: skip this many matches (newest first), then return at most `limit`. */
+  offset?: number;
   limit?: number;
+}
+
+/** One page of matches plus how many match in total. */
+export interface ClipPage {
+  items: ClipView[];
+  total: number;
 }
 
 export interface LibraryDeps {
@@ -70,6 +78,21 @@ export interface LibraryDeps {
   now?: () => number;
   /** Downloads a blob body's ciphertext (set once sync is configured). */
   fetchBlob?: (id: string) => Promise<Uint8Array>;
+  /** On-device text recognition (OCR) for images, run only when the user asks (`recognize`). */
+  recognizeText?: (image: Uint8Array, mime: string) => Promise<string>;
+}
+
+/**
+ * Recognized text lives in the sealed meta, which must stay under EncryptedItem.meta's 4096 base64
+ * chars (2815 bytes of JSON once padded and sealed). This leaves room for a 200-char title.
+ */
+export const MAX_OCR_BYTES = 1400;
+
+/** Tidies recognized text and cuts it to MAX_OCR_BYTES (measured as JSON, since that is what is sealed). */
+export function fitOcr(text: string): string {
+  let t = text.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+  while (utf8(JSON.stringify(t)).length - 2 > MAX_OCR_BYTES) t = t.slice(0, Math.floor(t.length * 0.9)).trimEnd();
+  return t;
 }
 
 export type RemoteApplyResult = 'applied' | 'skipped' | 'unknown_epoch';
@@ -122,7 +145,7 @@ function prepare(input: CaptureInput): Prepared | null {
 
 function previewOf(meta: ItemMeta, text: string | null): { preview: string; searchText: string } {
   if (meta.kind === 'file') return { preview: meta.file?.name ?? '', searchText: `${meta.title ?? ''} ${meta.file?.name ?? ''}`.toLowerCase() };
-  if (text === null) return { preview: '', searchText: (meta.title ?? '').toLowerCase() };
+  if (text === null) return { preview: '', searchText: `${meta.title ?? ''} ${meta.ocr ?? ''}`.toLowerCase() };
   const plain = meta.kind === 'html' ? htmlToText(text) : text;
   return { preview: plain.slice(0, PREVIEW_CHARS), searchText: `${meta.title ?? ''} ${plain}`.toLowerCase() };
 }
@@ -227,7 +250,34 @@ export class ClipLibrary {
     return result;
   }
 
+  /**
+   * Recognizes the text in an image item on this device (the viewer's "Copy text"; never automatic) and
+   * stores it with the item, so it syncs and becomes searchable. Resolves with the stored text ('' = none).
+   */
+  async recognize(id: string): Promise<string> {
+    const view = this.get(id);
+    if (view?.meta.kind !== 'image') throw new TypeError('only images have text to recognize');
+    if (!this.deps.recognizeText) throw new Error('text recognition is not available on this device');
+    const text = fitOcr(await this.deps.recognizeText(await this.readBody(id), view.meta.mime));
+    await this.tx.transaction(async (db) => {
+      const row = await this.requireRow(id, db);
+      const { dek, meta } = this.openRow(row);
+      if (meta.ocr !== text) await this.save(db, { ...row, meta: sealMeta(dek, id, { ...meta, ocr: text }) }, this.now());
+    });
+    await this.reindex(id);
+    return text;
+  }
+
   list(filter: ListFilter = {}): ClipView[] {
+    return this.page(filter).items;
+  }
+
+  /**
+   * Matches newest first, cut to `offset`/`limit`, so only one page leaves the library (IPC, the WebView
+   * bridge). Filtering runs on the decrypted in-memory index: kind, text and title are encrypted in
+   * SQLite, so SQL cannot filter or search them.
+   */
+  page(filter: ListFilter = {}): ClipPage {
     const q = filter.query?.trim().toLowerCase();
     const out: ClipView[] = [];
     for (const e of this.index.values()) {
@@ -238,7 +288,8 @@ export class ClipLibrary {
       out.push({ id: e.id, meta: e.meta, preview: e.preview, hasThumb: e.hasThumb });
     }
     out.sort((a, b) => b.meta.createdAt - a.meta.createdAt || (b.id < a.id ? -1 : 1));
-    return filter.limit ? out.slice(0, filter.limit) : out;
+    const from = filter.offset ?? 0;
+    return { items: filter.limit ? out.slice(from, from + filter.limit) : out.slice(from), total: out.length };
   }
 
   get(id: string): ClipView | undefined {
@@ -495,6 +546,7 @@ export class ClipLibrary {
         const merged: ItemMeta = {
           ...theirs.meta, pinned: mine.meta.pinned, favorite: mine.meta.favorite,
           ...(mine.meta.title !== undefined ? { title: mine.meta.title } : {}),
+          ...(theirs.meta.ocr === undefined && mine.meta.ocr !== undefined ? { ocr: mine.meta.ocr } : {}),
         };
         await this.save(db, { ...remote, meta: sealMeta(theirs.dek, id, merged), pinned: merged.pinned, favorite: merged.favorite }, now);
         return 'merged' as const;
