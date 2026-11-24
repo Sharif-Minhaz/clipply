@@ -1,7 +1,7 @@
 {
   "name": "@clipply/desktop",
   "productName": "Clipply",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "type": "module",
   "description": "Clipply — end-to-end encrypted clipboard history",
