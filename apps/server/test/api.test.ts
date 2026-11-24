@@ -89,7 +89,7 @@ describe('sync', () => {
     expect(first.body.results).toEqual([{ opId: op.opId, status: 'applied', rev: 1, seq: 1 }]);
     const again = await push(d, [op]);
     expect(again.body.results).toEqual(first.body.results);
-    expect((await request(h.app).get('/v1/sync/head').set(...bearer(d))).body).toEqual({ seq: 1, keyEpoch: 1 });
+    expect((await request(h.app).get('/v1/sync/head').set(...bearer(d))).body).toMatchObject({ seq: 1, keyEpoch: 1 });
 
     const raw = JSON.stringify(await h.store.c.items.find({}).toArray()) + JSON.stringify(h.logs);
     expect(raw).not.toContain('PLAINTEXT-MARKER');

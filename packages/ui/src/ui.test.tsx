@@ -52,6 +52,8 @@ class FakeLibrary {
       copy,
       copyText: vi.fn(async () => {}),
       recognizeText: vi.fn(async () => ''),
+      imageText: vi.fn(async () => null),
+      similarTexts: async () => [],
       setFlags: async (id, flags) => {
         this.items = this.items.map((i) => (i.id === id ? { ...i, meta: { ...i.meta, ...flags } } : i));
         emit();
@@ -362,7 +364,8 @@ describe('shared UI', () => {
     expect((await screen.findByRole('status')).textContent).toBe('Added.');
 
     const [, fileInput] = container.querySelectorAll('input[type=file]');
-    const big = new File([new Uint8Array(11 * 1024 * 1024)], 'movie.mp4', { type: 'video/mp4' });
+    const big = new File(['x'], 'movie.mp4', { type: 'video/mp4' });
+    Object.defineProperty(big, 'size', { value: 101 * 1024 * 1024 });
     await user.upload(fileInput as HTMLInputElement, big);
     expect((await screen.findByRole('alert')).textContent).toContain('Too large');
     expect(add).toHaveBeenCalledTimes(1);

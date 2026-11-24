@@ -3,15 +3,16 @@ import { CapacitorHttp } from '@capacitor/core';
 import { SocialLogin } from '@capgo/capacitor-social-login';
 import { z } from 'zod';
 import {
-  createKeyring, fromB64, fromUtf8, generateDeviceKeys, initCrypto, parseKeyring, serializeKeyring, toB64,
+  concat, createKeyring, fromB64, fromUtf8, generateDeviceKeys, initCrypto, parseKeyring, serializeKeyring, toB64,
   type DeviceKeyPairs, type Keyring,
 } from '@clipply/crypto';
 import { kvRepo, migrate, type SqlDb } from '@clipply/database';
 import { createLogger } from '@clipply/logger';
-import { AccountController, ClipLibrary, exportBackup, importBackup, LinkPreviewer, RELEASES_LATEST, saveFileName, UpdateChecker, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
+import { DEFAULT_OCR_LANGUAGES, OcrLanguages } from '@clipply/shared-schemas';
+import { AccountController, ClipLibrary, exportBackup, htmlToText, importBackup, LinkPreviewer, MAX_CAPTURE_BYTES, RELEASES_LATEST, saveFileName, UpdateChecker, uuidv7, type PreviewGet, type StoredSession } from '@clipply/sync-engine';
 import type { AccountClient, BackupActions, ClipplyClient, UpdateClient } from '@clipply/ui';
 
-import { b64ToBytes, bytesToB64, ClipplyNative, type InboxEntry } from './native';
+import { b64ToBytes, bytesToB64, chunkStore, ClipplyNative, type InboxEntry } from './native';
 import { decodeImage } from './images';
 import { recognizeWith, tesseract } from './ocr';
 import { openCapacitorDb } from './sqlite';
@@ -69,6 +70,8 @@ export const MobileSettings = z.object({
   linkPreviews: z.boolean().default(true),
   /** Ask GitHub for a newer release on every cold start, then at most once a day on resume. */
   checkUpdates: z.boolean().default(true),
+  /** Languages text recognition reads besides English. */
+  ocrLanguages: OcrLanguages.default([...DEFAULT_OCR_LANGUAGES]),
 });
 
 /** Native GET (the WebView's fetch is blocked by CORS); redirects are left to the shared code to check hop by hop. */
@@ -111,10 +114,10 @@ export async function boot(): Promise<Runtime> {
 
   let controller: AccountController | null = null;
   const library = new ClipLibrary({
-    db, keyring: () => vault.keyring, deviceId: vault.deviceId, fetchBlob: (id) => controller!.engine.fetchBlob(id),
+    db, keyring: () => vault.keyring, deviceId: vault.deviceId, fetchBlob: (id, chunk) => controller!.engine.fetchBlob(id, chunk), chunks: chunkStore,
     recognizeText: (image, mime) => recognizeWith(
       async () => (await ClipplyNative.recognizeText({ data: bytesToB64(image) })).text,
-      () => tesseract(image, mime),
+      () => tesseract(image, mime, settings.ocrLanguages),
     ),
   });
   await library.load();
@@ -167,16 +170,16 @@ export async function boot(): Promise<Runtime> {
 
   let lastSelfWrite: string | null = null;
   /** `createdAt` set (inbox entries): keep the original time, so a screenshot taken while Clipply was closed sorts where it happened. */
-  const capture = async (entry: Pick<InboxEntry, 'type' | 'mime' | 'data' | 'name'> & { text?: string; createdAt?: number }): Promise<void> => {
+  const capture = async (entry: Pick<InboxEntry, 'type' | 'mime' | 'data' | 'name'> & { text?: string; createdAt?: number; bytes?: Uint8Array }): Promise<void> => {
     if (!settings.monitoring) return;
     const restore = entry.createdAt ? { createdAt: entry.createdAt, pinned: false, favorite: false } : undefined;
     if (entry.type === 'text') {
-      const text = entry.text ?? fromUtf8(b64ToBytes(entry.data));
+      const text = entry.text ?? fromUtf8(b64ToBytes(entry.data ?? ''));
       if (text === lastSelfWrite) return;
       await library.capture({ type: 'text', text }, restore);
       return;
     }
-    const data = b64ToBytes(entry.data);
+    const data = entry.bytes ?? b64ToBytes(entry.data ?? '');
     if (entry.type === 'file') {
       await library.capture({ type: 'file', mime: entry.mime, data, name: entry.name ?? 'file' }, restore);
       return;
@@ -187,13 +190,26 @@ export async function boot(): Promise<Runtime> {
     await library.capture({ type: 'image', mime: entry.mime, data, ...(decoded ? { thumb: decoded.thumb, pixels: decoded.pixels } : {}) }, restore);
   };
 
+  /** A large shared file; parts cross the bridge one at a time. */
+  const readParts = async (id: string, count: number): Promise<Uint8Array> => {
+    const parts: Uint8Array[] = [];
+    for (let index = 0; index < count; index++) {
+      const { data } = await ClipplyNative.inboxPart({ id, index });
+      if (data === null) throw new Error(`part ${index} is missing`);
+      parts.push(b64ToBytes(data));
+    }
+    return concat(...parts);
+  };
+
   const drainInbox = async (): Promise<void> => {
     const { entries } = await ClipplyNative.drainInbox();
     for (const e of entries) {
       try {
-        await capture(e);
+        await capture(e.parts ? { ...e, bytes: await readParts(e.id, e.parts) } : e);
       } catch (error) {
         log.warn('inbox item skipped', { error, source: e.source });
+      } finally {
+        if (e.parts) await ClipplyNative.inboxDone({ id: e.id });
       }
     }
   };
@@ -309,8 +325,10 @@ export async function boot(): Promise<Runtime> {
       const body = await library.readBody(id);
       if (v?.meta.kind === 'image') await ClipplyNative.writeClipboardImage({ data: bytesToB64(body), mime: v.meta.mime });
       else {
-        lastSelfWrite = fromUtf8(body);
-        await ClipplyNative.writeClipboardText({ text: lastSelfWrite });
+        const content = fromUtf8(body);
+        const html = v?.meta.kind === 'html' ? content : undefined;
+        lastSelfWrite = html === undefined ? content : htmlToText(html);
+        await ClipplyNative.writeClipboardText({ text: lastSelfWrite, ...(html === undefined ? {} : { html }) });
       }
     },
     copyText: async (text) => {
@@ -318,10 +336,24 @@ export async function boot(): Promise<Runtime> {
       await ClipplyNative.writeClipboardText({ text });
     },
     recognizeText: (id) => library.recognize(id),
+    imageText: (id) => library.readOcr(id),
+    similarTexts: () => library.similarTexts(),
     saveFile: async (id) => {
       const v = library.get(id);
       if (!v) throw new Error('item not found');
       const name = saveFileName(v.meta);
+      if (v.meta.size > MAX_CAPTURE_BYTES) {
+        // Everything is on the device before the user is asked where to put it.
+        await library.cacheBody(id);
+        const { handle } = await ClipplyNative.createDocument({ name });
+        if (handle === null) return false;
+        try {
+          for await (const part of library.bodyParts(id)) await ClipplyNative.appendDocument({ handle, data: bytesToB64(part) });
+        } finally {
+          await ClipplyNative.closeDocument({ handle });
+        }
+        return true;
+      }
       return (await ClipplyNative.saveDocument({ name, data: bytesToB64(await library.readBody(id)) })).saved;
     },
     setFlags: (id, flags) => library.setFlags(id, flags),
@@ -360,6 +392,7 @@ export async function boot(): Promise<Runtime> {
     acceptEnrollment: () => account.acceptEnrollment(),
     recover: (k) => account.recover(k),
     devices: () => account.devices(),
+    deviceNames: () => account.deviceNames(),
     startApproval: (id) => account.startApproval(id),
     approvalCode: (id) => account.approvalCode(id),
     pairingQr: () => account.pairingQr(),

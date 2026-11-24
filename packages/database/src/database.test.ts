@@ -12,7 +12,7 @@ beforeEach(async () => {
 
 const row = (id: string, createdAt: number, extra: Partial<ItemRow> = {}): ItemRow => ({
   id, keyEpoch: 1, dek: Uint8Array.of(1), meta: Uint8Array.of(2), body: Uint8Array.of(3), thumb: null,
-  blobKey: null, blobSize: null, contentHash: `h${id}`, createdAt, pinned: false, favorite: false,
+  blobKey: null, blobSize: null, ocr: null, chunks: null, contentHash: `h${id}`, createdAt, pinned: false, favorite: false,
   deleted: false, rev: 0, seq: null, syncState: 'local', updatedAt: createdAt, ...extra,
 });
 
@@ -27,7 +27,7 @@ describe('migrate', () => {
 describe('itemRepo', () => {
   it('round-trips a row including blobs and booleans', async () => {
     const items = itemRepo(db);
-    const r = row('a', 10, { pinned: true, blobKey: 'k', blobSize: 9, thumb: Uint8Array.of(7) });
+    const r = row('a', 10, { pinned: true, blobKey: 'k', blobSize: 9, thumb: Uint8Array.of(7), ocr: Uint8Array.of(8), chunks: [{ key: 'k', size: 9 }, null] });
     await items.put(r);
     expect(await items.get('a')).toEqual(r);
     expect(await items.get('missing')).toBeNull();

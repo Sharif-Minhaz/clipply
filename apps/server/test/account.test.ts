@@ -92,6 +92,13 @@ describe('AccountController (shared by desktop and Android)', () => {
     expect(await bodies(phone)).toEqual(await bodies(laptop));
     expect(laptop.account.getStatus().sync).toMatchObject({ state: 'idle', pending: 0 });
 
+    // Labels for clips from the other device: never this one's own name, and remembered (read from the database).
+    const laptopId = (await laptop.account.devices()).find((d) => d.isThisDevice)!.id;
+    expect(await phone.account.deviceNames()).toEqual({ [laptopId]: 'Laptop' });
+    expect(await laptop.account.deviceNames()).toEqual({ [pending.id]: 'Phone' });
+    await laptop.account.rename(pending.id, 'Pixel');
+    expect(await laptop.account.deviceNames()).toEqual({ [pending.id]: 'Pixel' });
+
     // Access tokens expire after 15 minutes; the controller refreshes transparently.
     h.clock.now += 20 * 60_000;
     await laptop.library.capture({ type: 'text', text: 'after token expiry' });

@@ -74,6 +74,8 @@ export interface AccountDeps {
 
 const VAULT_VERSION = 'vault.version';
 const SYNC_PAUSED = 'sync.paused';
+const DEVICE_NAMES = 'devices.names';
+const NAMES_MAX_AGE_MS = 6 * 3_600_000;
 const ACCESS_SKEW_MS = 60_000;
 const PAIRING_TTL_MS = 10 * 60_000;
 
@@ -266,6 +268,8 @@ export class AccountController {
       throw new Error('this device was removed from the vault');
     }
     if (res.status === 'updated') await this.d.setKeyring(res.ring);
+    // The roster changed: there may be a device whose name is not known yet.
+    this.namesAt = 0;
     await kvRepo(this.d.db).set(VAULT_VERSION, state.version);
     this.update({ vault: 'ready' });
   }
@@ -400,11 +404,41 @@ export class AccountController {
   // ── devices: approver side ─────────────────────────────────────────────────────────────
 
   async devices(): Promise<DeviceInfo[]> {
-    return (await this.api.listDevices()).devices.map((x) => ({
+    const { devices } = await this.api.listDevices();
+    await this.rememberNames(Object.fromEntries(devices.map((x) => [x.id, x.name])));
+    return devices.map((x) => ({
       id: x.id, name: x.name, platform: x.platform, status: x.status, lastSeenAt: x.lastSeenAt,
       ...(x.lastSyncAt !== undefined ? { lastSyncAt: x.lastSyncAt } : {}),
       isThisDevice: x.id === this.identity.deviceId,
     }));
+  }
+
+  /**
+   * Names of the account's other devices, by id, for "from <device>" labels. Remembered on this device, so
+   * they show offline and for devices removed since.
+   */
+  async deviceNames(): Promise<Record<string, string>> {
+    const names = { ...((await kvRepo(this.d.db).get<Record<string, string>>(DEVICE_NAMES)) ?? {}) };
+    delete names[this.identity.deviceId];
+    return names;
+  }
+
+  private namesAt = 0;
+
+  private async rememberNames(names: Record<string, string>): Promise<void> {
+    this.namesAt = this.now();
+    const kv = kvRepo(this.d.db);
+    const known = (await kv.get<Record<string, string>>(DEVICE_NAMES)) ?? {};
+    const next = { ...known, ...names };
+    if (JSON.stringify(next) === JSON.stringify(known)) return;
+    await kv.set(DEVICE_NAMES, next);
+    this.emit();
+  }
+
+  /** Names only label clips: a failure here never fails a sync. */
+  private async refreshNames(): Promise<void> {
+    if (this.namesAt > 0 && this.now() - this.namesAt < NAMES_MAX_AGE_MS) return;
+    await this.devices().catch((error: unknown) => this.d.log.debug('device names not refreshed', { error }));
   }
 
   /** Claims a pending device and returns the code to compare with the one it shows. */
@@ -470,6 +504,7 @@ export class AccountController {
 
   async rename(deviceId: string, name: string): Promise<void> {
     await this.api.renameDevice(deviceId, name);
+    await this.rememberNames({ [deviceId]: name });
   }
 
   // ── sync scheduling ────────────────────────────────────────────────────────────────────
@@ -482,6 +517,7 @@ export class AccountController {
       await this.refreshVault();
       if (this.status.vault !== 'ready') return;
       await this.engine.sync();
+      void this.refreshNames();
       this.update({ sync: { state: 'idle', lastSyncAt: this.now(), pending: await outboxRepo(this.d.db).pendingCount() } });
     } catch (error) {
       this.syncFailed(error);

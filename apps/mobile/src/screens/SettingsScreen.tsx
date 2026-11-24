@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AppVersion, BackupPanel, selectClass, SettingRow, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
+import { AppVersion, BackupPanel, OCR_LANGUAGES_NOTE, OcrLanguageRows, selectClass, SettingRow, SettingsSection, SimilarPanel, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { MobileSettings, Runtime } from '../services/runtime';
 
@@ -46,6 +46,10 @@ export function SettingsScreen({ rt }: { rt: Runtime }) {
           </select>
         </SettingRow>
         <StoragePanel />
+        <SimilarPanel />
+      </SettingsSection>
+      <SettingsSection title="Text in images" description={OCR_LANGUAGES_NOTE}>
+        <OcrLanguageRows value={s.ocrLanguages} onChange={(ocrLanguages) => update({ ocrLanguages })} />
       </SettingsSection>
       <SettingsSection title="Backup" description="Save your history to an encrypted file, or bring one back in.">
         <BackupPanel actions={rt} />

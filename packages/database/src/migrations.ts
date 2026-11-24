@@ -46,6 +46,12 @@ export const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
+  // ocr: all recognized text of an image (ciphertext). chunks: JSON array of {key,size}|null upload refs, set
+  // only for bodies too large for one blob; their ciphertext lives in the ChunkStore, not in this table.
+  `
+  ALTER TABLE items ADD COLUMN ocr BLOB;
+  ALTER TABLE items ADD COLUMN chunks TEXT;
+  `,
 ];
 
 export async function migrate(db: SqlDb): Promise<number> {

@@ -74,11 +74,15 @@ export function extendsKeyring(candidate: Keyring, known: Keyring): boolean {
   return true;
 }
 
-/** Keyed hash for duplicate detection. Derived from epoch 1 so hashes stay comparable across rotations. */
-export function contentHash(ring: Keyring, normalizedContent: Uint8Array): string {
+const HASH_STEP = 1 << 20;
+
+/** Keyed hash (over the concatenated parts) for duplicate detection. Derived from epoch 1 so hashes stay comparable across rotations. */
+export function contentHash(ring: Keyring, ...parts: Uint8Array[]): string {
   const s = sodium();
-  const hashKey = s.crypto_kdf_derive_from_key(32, 1, 'clphash_', epochKey(ring, 1));
-  return s.to_hex(s.crypto_generichash(32, normalizedContent, hashKey));
+  const state = s.crypto_generichash_init(s.crypto_kdf_derive_from_key(32, 1, 'clphash_', epochKey(ring, 1)), 32);
+  // Fed in pieces: a large file would otherwise be copied whole, twice, into WASM memory.
+  for (const part of parts) for (let i = 0; i < part.length; i += HASH_STEP) s.crypto_generichash_update(state, part.subarray(i, i + HASH_STEP));
+  return s.to_hex(s.crypto_generichash_final(state, 32));
 }
 
 const PublicPair = z.object({ box: z.string(), sign: z.string() });

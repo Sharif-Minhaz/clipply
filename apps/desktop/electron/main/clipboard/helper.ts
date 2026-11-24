@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline';
 import type { Logger } from '@clipply/logger';
 import type { CaptureInput } from '@clipply/sync-engine';
 
-import type { ClipboardProvider, DecodedImage } from './provider';
+import { loadFile, type ClipboardProvider, type DecodedImage, type FileRef } from './provider';
 
 /**
  * Why a helper process: on GNOME Wayland only an XWayland client can read the clipboard while
@@ -71,6 +71,16 @@ export class HelperClipboardProvider implements ClipboardProvider {
     this.child = null;
   }
 
+  /** One at a time, so copying many large files does not hold all of them in memory at once. */
+  private files: Promise<void> = Promise.resolve();
+
+  private captureFile(ref: FileRef): void {
+    this.files = this.files.then(async () => {
+      const input = await loadFile(ref).catch(() => null);
+      if (input) this.callback?.(input);
+    });
+  }
+
   private complete(input: CaptureInput | null): CaptureInput | null {
     if (input?.type !== 'image') return input;
     const decoded = this.opts.decodeImage(input.data);
@@ -102,7 +112,9 @@ export class HelperClipboardProvider implements ClipboardProvider {
       }
       if (m.t === 'capture') {
         this.restarts = 0;
-        const input = this.complete(m.input as CaptureInput);
+        const received = m.input as CaptureInput | FileRef;
+        if (received.type === 'file-ref') return this.captureFile(received);
+        const input = this.complete(received);
         if (input) this.callback?.(input);
       } else if (m.id !== undefined) {
         this.pending.get(m.id)?.resolve(m);

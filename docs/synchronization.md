@@ -59,7 +59,7 @@ Outbox rows carry `attempts` and `nextAttemptAt` (exponential backoff 5 s → 30
 POST /v1/sync/push            PushRequest  → PushResponse
 GET  /v1/sync/pull?cursor&limit            → PullResponse | 410
 GET  /v1/sync/head                         → SyncHead
-POST /v1/storage/upload-signature {itemId,size} → signed Cloudinary raw/private upload params (≤ 10 MB)
+POST /v1/storage/upload-signature {itemId,size} → signed Cloudinary raw/private upload params (≤ 10 MB; one call per chunk of a larger file)
 POST /v1/storage/confirm      {itemId, uploadResponse} → verifies Cloudinary signature, records object
 GET  /v1/storage/download-url?itemId          → short-lived signed private download URL (owner-checked)
 ```
@@ -67,6 +67,10 @@ GET  /v1/storage/download-url?itemId          → short-lived signed private dow
 ## 8. Implementation notes
 
 - **Payload choice**: text-like bodies travel inline when the ciphertext fits (≤ ~48 KB); larger bodies and **all images** go to Cloudinary, so the encrypted thumbnail can ride inline. After a sync that pulled changes, the bodies of the images among the 15 newest items (at most 5) are downloaded in the background (so copying a recent image never waits on the network); older images and other blobs are fetched on first use, with a "Copying…" spinner on the card. Either way they are authenticated, then cached as ciphertext.
+- **Large files** (over ~10 MB, up to 100 MB): the body is split into 4 MiB chunks, each its own ciphertext and Cloudinary blob. The item carries `chunks` (every ref) and repeats the first as `blob`, so an app from before chunks still accepts the pull; the server keeps `chunks` when such an app pushes the same blob without them. Uploaded refs are recorded one by one, so an interrupted upload resumes. Large items are pushed after small ones. Chunk ciphertext lives in the platform `ChunkStore` (files), not in SQLite, and is downloaded only when the file is opened or saved.
+- **`ocr`**: all recognized text of an image. A push without it (older app) keeps the stored one; a scan that finds nothing sends an encrypted empty text, which replaces it.
+- **Server features**: `GET /sync/head` announces `features`. A client holds back chunked items until the server lists `chunks`, because an older server would drop the extra refs.
+- **Size limits**: a push stays near `MAX_SYNC_BYTES` (3 MB) and a pull page ends there too, because Vercel caps both bodies at 4.5 MB. Later pages of a pull that began at cursor 0 send `resync=1`: they can end below `purgeFloor`, and without it the server would answer 410 and the client would start over forever.
 - **Conflict outcomes** (`ClipLibrary.resolveConflict`): same content hash → server version kept with our flags/title re-applied (`merged`); different content → server version kept under the id and our edit saved as a new item titled "Edited copy" (`forked`); server tombstone → local item removed (`deleted`).
 - **Pending local edits are never overwritten by a pull**; their push conflicts and is resolved as above.
 - **Desktop scheduling** (`AccountController.startScheduler`): `/vault/state` + `/sync/head` probe every 60 s (5 min after 30 min idle), sync 2 s after local changes and on window focus. Android does not use the scheduler (WorkManager, Phase 6).

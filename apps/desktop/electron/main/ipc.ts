@@ -1,8 +1,7 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { MIN_PASSPHRASE_LENGTH } from '@clipply/crypto';
-import { ClipKind } from '@clipply/shared-schemas';
-import { DeviceName } from '@clipply/shared-schemas';
+import { ClipKind, DeviceName, MAX_FILE_BYTES } from '@clipply/shared-schemas';
 import { exportBackup, importBackup, MAX_CAPTURE_BYTES, type AccountController, type ClipLibrary, type UpdateChecker } from '@clipply/sync-engine';
 import type { Logger } from '@clipply/logger';
 
@@ -29,7 +28,7 @@ const Text = z.string().max(MAX_CAPTURE_BYTES);
 const Upload = {
   name: z.string().min(1).max(255),
   mime: z.string().min(1).max(255),
-  data: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= MAX_CAPTURE_BYTES, 'empty or too large'),
+  data: z.instanceof(Uint8Array).refine((b) => b.length > 0 && b.length <= MAX_FILE_BYTES, 'empty or too large'),
 };
 const ManualInput = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: Text.min(1) }).strict(),
@@ -99,6 +98,8 @@ export function registerIpc(d: IpcDeps): void {
   handle(CH.copy, z.tuple([Id]), (id) => core().copy(id));
   handle(CH.copyText, z.tuple([Text.min(1)]), (text) => core().copyText(text));
   handle(CH.recognize, z.tuple([Id]), (id) => lib().recognize(id));
+  handle(CH.imageText, z.tuple([Id]), (id) => lib().readOcr(id));
+  handle(CH.similarTexts, z.tuple([]), () => lib().similarTexts());
   handle(CH.saveFile, z.tuple([Id]), (id) => core().saveFile(id));
   handle(CH.openUrl, z.tuple([Id]), (id) => core().openUrl(id));
   handle(CH.linkPreview, z.tuple([Id]), (id) => core().linkPreview(id));
@@ -145,6 +146,7 @@ export function registerIpc(d: IpcDeps): void {
   handle(CH.acceptEnrollment, z.tuple([]), () => acct().acceptEnrollment());
   handle(CH.recover, z.tuple([z.string().min(40).max(120)]), (key) => acct().recover(key));
   handle(CH.devices, z.tuple([]), () => acct().devices());
+  handle(CH.deviceNames, z.tuple([]), () => acct().deviceNames());
   handle(CH.startApproval, z.tuple([Id]), (id) => acct().startApproval(id));
   handle(CH.approvalCode, z.tuple([Id]), (id) => acct().approvalCode(id));
   handle(CH.pairingQr, z.tuple([]), () => acct().pairingQr());

@@ -11,6 +11,8 @@ export const CH = {
   copy: 'clips:copy',
   copyText: 'clips:copy-text',
   recognize: 'clips:recognize',
+  imageText: 'clips:image-text',
+  similarTexts: 'clips:similar-texts',
   saveFile: 'clips:save-file',
   openUrl: 'clips:open-url',
   linkPreview: 'clips:link-preview',
@@ -39,6 +41,7 @@ export const CH = {
   acceptEnrollment: 'account:accept-enrollment',
   recover: 'account:recover',
   devices: 'devices:list',
+  deviceNames: 'devices:names',
   startApproval: 'devices:start-approval',
   approvalCode: 'devices:approval-code',
   pairingQr: 'devices:pairing-qr',
@@ -82,6 +85,8 @@ export interface DesktopApi {
   copy(id: string): Promise<void>;
   copyText(text: string): Promise<void>;
   recognizeText(id: string): Promise<string>;
+  imageText(id: string): Promise<string | null>;
+  similarTexts(): Promise<ClipView[][]>;
   saveFile(id: string): Promise<boolean>;
   openUrl(id: string): Promise<void>;
   linkPreview(id: string): Promise<LinkPreview | null>;
@@ -124,6 +129,7 @@ export interface DesktopApi {
     acceptEnrollment(): Promise<void>;
     recover(recoveryKey: string): Promise<void>;
     devices(): Promise<DeviceInfo[]>;
+    deviceNames(): Promise<Record<string, string>>;
     startApproval(deviceId: string): Promise<{ code: string }>;
     approvalCode(deviceId: string): Promise<{ code: string }>;
     confirmApproval(deviceId: string): Promise<void>;

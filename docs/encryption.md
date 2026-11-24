@@ -34,7 +34,7 @@ Keyring (sealed + signed; never stored in clear outside OS secure storage)
 
 VKe ── wraps per-item DEKs created while e is current
 VK1 ── kdf(VK1, 1, "clphash_") → content-hash key (stable across rotations)
-Item DEK (random per item) ── meta, body, thumb ciphertexts
+Item DEK (random per item) ── meta, body, thumb, ocr ciphertexts
 Device keys (never leave OS storage): X25519 box keypair, Ed25519 sign keypair
 ```
 
@@ -45,11 +45,13 @@ The roster and recovery public keys travel **inside** the authenticated keyring,
 Every AEAD ciphertext is `nonce(24) || ciphertext+tag`, with AAD binding it to its item and field:
 
 ```text
-AAD   = "clipply/v1/" + itemId + "/" + part        part ∈ {dek, meta, body, thumb}
+AAD   = "clipply/v1/" + itemId + "/" + part        part ∈ {dek, meta, body, thumb, ocr, body/<i>/<n>}
 dek   = AEAD(VKe, DEK,                   AAD(dek))   ; keyEpoch e in clear
 meta  = AEAD(DEK, pad(JSON(ItemMeta)),   AAD(meta))
 body  = AEAD(DEK, pad(content),          AAD(body))  ; inline or as the Cloudinary blob
 thumb = AEAD(DEK, pad(jpeg thumbnail),   AAD(thumb))
+ocr   = AEAD(DEK, pad(recognized text),  AAD(ocr))    ; all of it; meta keeps only its start
+chunk = AEAD(DEK, pad(4 MiB of content), AAD(body/<i>/<n>)) ; bodies over one blob: chunk i of n
 ```
 
 `userId` is not in the AAD: items exist before any account (local-only mode) and the globally unique item id already prevents swaps; users never share a vault key. Decrypted metadata is validated with Zod (another device wrote it). Fixed vectors for the Kotlin implementation: `packages/crypto/vectors/item-v1.json`.

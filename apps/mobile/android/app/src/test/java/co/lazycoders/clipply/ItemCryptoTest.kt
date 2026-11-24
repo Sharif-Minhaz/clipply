@@ -45,6 +45,27 @@ class ItemCryptoTest {
         assertThrows(Exception::class.java) { ItemCrypto.open(dek, ItemCrypto.b64urlDecode(item.getString("body")), ItemCrypto.aad(id, "meta")) }
     }
 
+    @Test fun encryptsImagesAndFilesAsBlobs() {
+        val crypto = ItemCrypto(keyring)
+        val data = ByteArray(70_000) { (it % 251).toByte() }
+        val pixels = ByteArray(64) { it.toByte() }
+        val made = crypto.encryptBlob("image", "image/png", data, pixels, byteArrayOf(9, 8, 7), null, "0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b", 1_700_000_000_000)!!
+        val dek = ItemCrypto.open(vk, ItemCrypto.b64urlDecode(made.item.getString("dek")), ItemCrypto.aad(made.id, "dek"))
+        fun part(name: String, box: ByteArray) = ItemCrypto.unpad(ItemCrypto.open(dek, box, ItemCrypto.aad(made.id, name)))
+        val meta = JSONObject(String(part("meta", ItemCrypto.b64urlDecode(made.item.getString("meta")))))
+        assertEquals("image", meta.getString("kind"))
+        assertEquals(data.size, meta.getInt("size"))
+        assertEquals(crypto.keyedHash("image\u0000".toByteArray() + pixels), meta.getString("contentHash"))
+        assertArrayEquals(data, part("body", made.body))
+        assertArrayEquals(byteArrayOf(9, 8, 7), part("thumb", ItemCrypto.b64urlDecode(made.item.getString("thumb"))))
+
+        val file = crypto.encryptBlob("file", "application/pdf", data, data, null, "অ".repeat(300), "d", 1)!!
+        assert(!file.item.has("thumb"))
+        assert(file.item.getString("meta").length <= ItemCrypto.META_MAX)
+        assertNull(crypto.encryptBlob("file", "x/y", ByteArray(ItemCrypto.MAX_CONTENT_BYTES + 1), data, null, "a", "d", 1))
+        assert(crypto.encryptBlob("file", "x/y", ByteArray(ItemCrypto.MAX_CONTENT_BYTES), data, null, "a", "d", 1)!!.body.size <= 10 * 1024 * 1024)
+    }
+
     @Test fun classifiesUrlsAndSkipsEmpty() {
         val crypto = ItemCrypto(keyring)
         val item = crypto.encryptText("https://clipply.dev", "d", 1, SecureRandom())!!

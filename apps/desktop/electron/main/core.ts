@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { open, rm } from 'node:fs/promises';
 import { fromUtf8 } from '@clipply/crypto';
 import { kvRepo, type SqlDb } from '@clipply/database';
 import type { Logger } from '@clipply/logger';
@@ -70,8 +70,11 @@ export class DesktopCore {
   }
 
   /** Logs ids and kinds only, never content. */
-  async capture(input: CaptureInput, source: 'clipboard' | 'screenshot'): Promise<void> {
+  async capture(captured: CaptureInput, source: 'clipboard' | 'screenshot'): Promise<void> {
     if (!this.settings.monitoring) return;
+    // Formatting is kept only when the user asked for it; HTML without a plain version has nothing else to keep.
+    const input: CaptureInput =
+      captured.type === 'html' && captured.text !== undefined && !this.settings.keepFormatting ? { type: 'text', text: captured.text } : captured;
     if (input.type === 'image' && !this.settings.captureImages) return;
     // Clipboard changes are seen within one poll of the copy, so the focused app is the source in practice.
     const excluded = this.settings.excludedApps;
@@ -148,7 +151,16 @@ export class DesktopCore {
     if (!view || !this.deps.chooseSavePath) throw new Error('item not found');
     const path = await this.deps.chooseSavePath(saveFileName(view.meta));
     if (!path) return false;
-    await writeFile(path, await this.deps.library.readBody(id), { mode: 0o600 });
+    const file = await open(path, 'w', 0o600);
+    try {
+      // Piece by piece: a large file never has to fit in memory whole.
+      for await (const part of this.deps.library.bodyParts(id)) await file.writeFile(part);
+    } catch (error) {
+      await rm(path, { force: true });
+      throw error;
+    } finally {
+      await file.close();
+    }
     return true;
   }
 

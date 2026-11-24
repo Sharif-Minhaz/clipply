@@ -2,7 +2,7 @@ import { fromB64, fromUtf8, openWithPassphrase, sealWithPassphrase, toB64, utf8 
 import { ClipKind } from '@clipply/shared-schemas';
 import { z } from 'zod';
 
-import type { CaptureInput, ClipLibrary } from './library';
+import { MAX_CAPTURE_BYTES, type CaptureInput, type ClipLibrary } from './library';
 
 const Entry = z.object({
   kind: ClipKind,
@@ -12,6 +12,8 @@ const Entry = z.object({
   favorite: z.boolean(),
   title: z.string().max(200).optional(),
   fileName: z.string().max(255).optional(),
+  /** All text recognized in an image; backups from before this field restore without it. */
+  ocr: z.string().max(100_000).optional(),
   body: z.string(),
   thumb: z.string().optional(),
 });
@@ -20,20 +22,26 @@ type Entry = z.infer<typeof Entry>;
 
 /**
  * Encrypted export of the whole history (passphrase-protected, portable between accounts and
- * vaults). Items whose body is not available right now (a blob that cannot be downloaded) are skipped.
+ * vaults). Items whose body is not available right now (a blob that cannot be downloaded) and files over
+ * 10 MB (the whole backup is built in memory) are skipped.
  */
 export async function exportBackup(library: ClipLibrary, passphrase: string): Promise<{ data: Uint8Array; count: number; skipped: number }> {
   const items: Entry[] = [];
   let skipped = 0;
   for (const v of library.list()) {
+    if (v.meta.size > MAX_CAPTURE_BYTES) {
+      skipped++;
+      continue;
+    }
     try {
       const body = await library.readBody(v.id);
       const thumb = v.hasThumb ? await library.readThumb(v.id) : null;
       const { meta } = v;
+      const ocr = meta.kind === 'image' ? await library.readOcr(v.id) : null;
       items.push({
         kind: meta.kind, mime: meta.mime, createdAt: meta.createdAt, pinned: meta.pinned, favorite: meta.favorite,
         ...(meta.title ? { title: meta.title } : {}), ...(meta.file ? { fileName: meta.file.name } : {}),
-        body: toB64(body), ...(thumb ? { thumb: toB64(thumb) } : {}),
+        ...(ocr !== null ? { ocr } : {}), body: toB64(body), ...(thumb ? { thumb: toB64(thumb) } : {}),
       });
     } catch {
       skipped++;
@@ -65,7 +73,7 @@ export async function importBackup(library: ClipLibrary, file: Uint8Array, passp
   // Oldest first, so ids (time-ordered) follow the original order.
   for (const e of [...parsed.data.items].sort((a, b) => a.createdAt - b.createdAt)) {
     try {
-      const r = await library.capture(toInput(e), { createdAt: e.createdAt, pinned: e.pinned, favorite: e.favorite, title: e.title });
+      const r = await library.capture(toInput(e), { createdAt: e.createdAt, pinned: e.pinned, favorite: e.favorite, title: e.title, ocr: e.ocr });
       if (r?.duplicate) out.duplicates++;
       else if (r) out.imported++;
     } catch {

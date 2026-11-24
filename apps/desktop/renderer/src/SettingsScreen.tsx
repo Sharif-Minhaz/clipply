@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AppVersion, BackupPanel, buttonClass, selectClass, SettingRow, SettingsSection, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
+import { AppVersion, BackupPanel, buttonClass, OCR_LANGUAGES_NOTE, OcrLanguageRows, selectClass, SettingRow, SettingsSection, SimilarPanel, StoragePanel, SwitchRow, ThemeSwitcher, UpdatePanel } from '@clipply/ui';
 
 import type { DesktopStatus } from '../../electron/shared/api';
 import type { Settings } from '../../electron/main/settings';
@@ -47,6 +47,12 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
 
       <SettingsSection title="Capture" description="Copies flagged as passwords by password managers are never saved.">
         <SwitchRow label="Watch the clipboard" checked={settings.monitoring} onChange={(v) => void update({ monitoring: v })} />
+        <SwitchRow
+          label="Keep formatting of copied text"
+          hint="Bold, links, lists and tables are saved as rich text. Plain text, links and code are saved as before."
+          checked={settings.keepFormatting}
+          onChange={(v) => void update({ keepFormatting: v })}
+        />
         <SwitchRow label="Save copied images" checked={settings.captureImages} onChange={(v) => void update({ captureImages: v })} />
         <SwitchRow
           label="Import new screenshots"
@@ -85,6 +91,11 @@ export function SettingsScreen({ status, onChanged }: { status: DesktopStatus | 
           </select>
         </SettingRow>
         <StoragePanel />
+        <SimilarPanel />
+      </SettingsSection>
+
+      <SettingsSection title="Text in images" description={OCR_LANGUAGES_NOTE}>
+        <OcrLanguageRows value={settings.ocrLanguages} onChange={(ocrLanguages) => void update({ ocrLanguages })} />
       </SettingsSection>
 
       <SettingsSection title="Backup" description="Save your history to an encrypted file, or bring one back in.">

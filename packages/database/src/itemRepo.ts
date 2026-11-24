@@ -2,6 +2,9 @@ import type { SqlDb, SqlValue } from './sqlDb';
 
 export type SyncState = 'local' | 'pending' | 'synced' | 'conflict';
 
+/** Where one chunk of a large body was uploaded; null until it has been. */
+export type ChunkRef = { key: string; size: number } | null;
+
 /** A stored item. Every Uint8Array is ciphertext. */
 export interface ItemRow {
   id: string;
@@ -12,6 +15,10 @@ export interface ItemRow {
   thumb: Uint8Array | null;
   blobKey: string | null;
   blobSize: number | null;
+  /** All recognized text of an image. */
+  ocr: Uint8Array | null;
+  /** One entry per chunk of a large body (`body` is then null and its ciphertext is in the ChunkStore). */
+  chunks: readonly ChunkRef[] | null;
   contentHash: string;
   createdAt: number;
   pinned: boolean;
@@ -32,6 +39,8 @@ interface RawRow {
   thumb: Uint8Array | null;
   blob_key: string | null;
   blob_size: number | null;
+  ocr: Uint8Array | null;
+  chunks: string | null;
   content_hash: string;
   created_at: number;
   pinned: number;
@@ -52,6 +61,8 @@ const fromRaw = (r: RawRow): ItemRow => ({
   thumb: r.thumb,
   blobKey: r.blob_key,
   blobSize: r.blob_size,
+  ocr: r.ocr,
+  chunks: r.chunks === null ? null : (JSON.parse(r.chunks) as ChunkRef[]),
   contentHash: r.content_hash,
   createdAt: r.created_at,
   pinned: r.pinned === 1,
@@ -64,11 +75,12 @@ const fromRaw = (r: RawRow): ItemRow => ({
 });
 
 const COLUMNS =
-  'id, key_epoch, dek, meta, body, thumb, blob_key, blob_size, content_hash, created_at, pinned, favorite, deleted, rev, seq, sync_state, updated_at';
+  'id, key_epoch, dek, meta, body, thumb, blob_key, blob_size, content_hash, created_at, pinned, favorite, deleted, rev, seq, sync_state, updated_at, ocr, chunks';
 
 const toParams = (i: ItemRow): SqlValue[] => [
   i.id, i.keyEpoch, i.dek, i.meta, i.body, i.thumb, i.blobKey, i.blobSize, i.contentHash, i.createdAt,
   i.pinned ? 1 : 0, i.favorite ? 1 : 0, i.deleted ? 1 : 0, i.rev, i.seq, i.syncState, i.updatedAt,
+  i.ocr, i.chunks && JSON.stringify(i.chunks),
 ];
 
 export interface ListCursor {
@@ -144,7 +156,7 @@ export function itemRepo(db: SqlDb) {
     /** Tombstone: ciphertext dropped now, row kept until the server acknowledges the delete. */
     async markDeleted(id: string, now: number): Promise<void> {
       await db.run(
-        `UPDATE items SET deleted = 1, body = NULL, thumb = NULL, meta = X'', dek = X'', updated_at = ? WHERE id = ?`,
+        `UPDATE items SET deleted = 1, body = NULL, thumb = NULL, ocr = NULL, chunks = NULL, meta = X'', dek = X'', updated_at = ? WHERE id = ?`,
         [now, id],
       );
     },

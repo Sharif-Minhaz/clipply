@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createKeyring, initCrypto } from '@clipply/crypto';
@@ -9,7 +10,8 @@ import { createLogger, type LogRecord } from '@clipply/logger';
 import { ClipLibrary, uuidv7, type CaptureInput } from '@clipply/sync-engine';
 
 import { autostartEntry, setAutostart } from './autostart';
-import { ElectronClipboardProvider, rawFormat, type ClipboardLike, type ClipboardProvider } from './clipboard/provider';
+import { fileChunkStore } from './chunkStore';
+import { ElectronClipboardProvider, rawFormat, type ClipboardLike, type ClipboardProvider, type FileRef } from './clipboard/provider';
 import { DesktopCore, type ClipboardWrite } from './core';
 import { registerIpc, type IpcMainLike } from './ipc';
 import { watchScreenshots } from './screenshot/watcher';
@@ -71,17 +73,57 @@ describe('ElectronClipboardProvider', () => {
     await p.stop();
   });
 
-  it('captures one copied file by contents, several files as their paths', async () => {
+  it('captures every copied file by contents, and paths as text when none can be kept', async () => {
     const cb = fakeClipboard();
     const { p, seen } = provider(cb);
     const f = join(tmp, 'report.pdf');
+    const g = join(tmp, 'my notes.txt');
     writeFileSync(f, Buffer.from('%PDF-1.7'));
-    cb.set({ 'text/uri-list': `file://${f}\r\n`, 'text/plain': f });
+    writeFileSync(g, 'hi');
+    mkdirSync(join(tmp, 'folder'));
+    const uri = (path: string): string => pathToFileURL(path).href;
+    cb.set({ 'text/uri-list': `${uri(f)}\r\n`, 'text/plain': f });
     await p.poll();
     expect(seen).toEqual([{ type: 'file', mime: 'application/pdf', data: new Uint8Array(Buffer.from('%PDF-1.7')), name: 'report.pdf' }]);
-    cb.set({ 'text/uri-list': `file://${f}\nfile://${tmp}/b.txt`, 'text/plain': `${f}\n${tmp}/b.txt` });
+    // A folder or a missing file among them is left out.
+    cb.set({ 'text/uri-list': [f, g, join(tmp, 'folder'), join(tmp, 'gone')].map(uri).join('\n'), 'text/plain': 'paths' });
     await p.poll();
-    expect(seen[1]).toEqual({ type: 'text', text: `${f}\n${tmp}/b.txt` });
+    await p.poll();
+    expect(seen.slice(1).map((i) => i.type === 'file' && i.name)).toEqual(['report.pdf', 'my notes.txt']);
+    cb.set({ 'text/uri-list': uri(join(tmp, 'folder')), 'text/plain': join(tmp, 'folder') });
+    await p.poll();
+    expect(seen[3]).toEqual({ type: 'text', text: join(tmp, 'folder') });
+    cb.set({ 'text/uri-list': Array.from({ length: 21 }, () => uri(f)).join('\n'), 'text/plain': 'too many' });
+    await p.poll();
+    expect(seen[4]).toEqual({ type: 'text', text: 'too many' });
+  });
+
+  it('offers formatting next to the text when there is any, and stays with the text otherwise', async () => {
+    const cb = fakeClipboard();
+    const { p, seen } = provider(cb);
+    cb.set({ 'text/plain': 'bold move', 'text/html': '<p><b>bold</b> move</p>' });
+    await p.poll();
+    cb.set({ 'text/plain': 'just text', 'text/html': '<span style="color:red">just text</span>' });
+    await p.poll();
+    cb.set({ 'text/plain': 'https://example.com/a', 'text/html': '<a href="https://example.com/a">https://example.com/a</a>' });
+    await p.poll();
+    cb.set({ 'text/plain': 'const x = 1;\nif (x) {\n  run();\n}', 'text/html': '<b>const</b> x = 1;' });
+    await p.poll();
+    cb.set({ 'text/plain': 'huge', 'text/html': `<b>${'x'.repeat(600_000)}</b>` });
+    await p.poll();
+    expect(seen.map((i) => i.type)).toEqual(['html', 'text', 'text', 'text', 'text']);
+    expect(seen[0]).toEqual({ type: 'html', html: '<p><b>bold</b> move</p>', text: 'bold move' });
+  });
+
+  it('hands copied files over unread when asked to (the helper process)', async () => {
+    const cb = fakeClipboard();
+    const refs: FileRef[] = [];
+    const p = new ElectronClipboardProvider({ clipboard: cb.clipboard, decodeImage: () => null, captureImages: () => true, onFileRef: (r) => refs.push(r), log, intervalMs: 1_000_000 });
+    const f = join(tmp, 'a.txt');
+    writeFileSync(f, 'x');
+    cb.set({ 'text/uri-list': `file://${f}`, 'text/plain': f });
+    await p.poll();
+    expect(refs).toEqual([{ type: 'file-ref', path: f }]);
   });
 
   it('skips password-manager content and respects markCurrentAsSeen', async () => {
@@ -287,6 +329,25 @@ describe('DesktopCore + IPC', () => {
     return { core, library, prov, writes, opened, emit: (i: CaptureInput) => onChange(i) };
   }
 
+  it('keeps formatting only when the setting is on, and copies both versions back', async () => {
+    const { core, library, writes, emit } = await setup();
+    const copy: CaptureInput = { type: 'html', html: '<p><b>bold</b> move</p><p>next</p>', text: 'bold move\n\nnext' };
+    emit(copy);
+    await vi.waitFor(() => expect(library.list().map((v) => v.meta.kind)).toEqual(['text']));
+    expect(library.list()[0]!.preview).toBe('bold move\n\nnext');
+    await core.updateSettings({ keepFormatting: true });
+    emit(copy);
+    await vi.waitFor(() => expect(library.list({ kinds: ['html'] })).toHaveLength(1));
+    const [rich] = library.list({ kinds: ['html'] });
+    expect(rich!.preview).toBe('bold move\n\nnext');
+    await core.copy(rich!.id);
+    expect(writes).toEqual([{ text: 'bold move\n\nnext', html: copy.html }]);
+    // HTML that came without a plain version is kept either way.
+    await core.updateSettings({ keepFormatting: false });
+    emit({ type: 'html', html: '<i>only html</i>' });
+    await vi.waitFor(() => expect(library.list({ kinds: ['html'] })).toHaveLength(2));
+  });
+
   it('skips copies made in an excluded app', async () => {
     let focused: string[] | null = ['keepassxc'];
     const { core, library } = await setup(async () => focused);
@@ -380,5 +441,39 @@ describe('DesktopCore + IPC', () => {
     await expect(handlers.get('clips:body')!({ senderFrame: { url: 'file:///x' } }, 'not-a-uuid')).rejects.toThrow(/invalid arguments/);
     expect(await list({ senderFrame: { url: 'file:///app/index.html' } }, {})).toEqual({ items: [], total: 0 });
     await expect(handlers.get('clips:body')!({ senderFrame: { url: 'file:///x' } }, uuidv7())).rejects.toThrow(/ItemNotFoundError/);
+  });
+});
+
+describe('file chunk store', () => {
+  it('keeps chunks private to the user, and refuses anything that is not an item id', async () => {
+    const dir = join(tmp, 'chunks');
+    const store = fileChunkStore(dir);
+    expect(await store.ids()).toEqual([]);
+    expect(await store.get(DEVICE, 0)).toBeNull();
+    await store.put(DEVICE, 0, Uint8Array.of(1, 2));
+    expect(await store.get(DEVICE, 0)).toEqual(Uint8Array.of(1, 2));
+    expect([await store.has(DEVICE, 0), await store.has(DEVICE, 1)]).toEqual([true, false]);
+    expect(statSync(join(dir, DEVICE, '0')).mode & 0o777).toBe(0o600);
+    expect(await store.ids()).toEqual([DEVICE]);
+    await expect(store.put('../../etc', 0, Uint8Array.of(1))).rejects.toThrow(/item id/);
+    await store.remove(DEVICE);
+    expect(await store.ids()).toEqual([]);
+  });
+
+  it('saves a file kept in chunks to disk, byte for byte', async () => {
+    const db = openTestDb();
+    await migrate(db);
+    const ring = createKeyring();
+    const library = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, chunks: fileChunkStore(join(tmp, 'chunks')) });
+    const out = join(tmp, 'out.bin');
+    const core = new DesktopCore({
+      db, library, log, writeClipboard: async () => {}, openExternal: async () => {}, applyScreenshots: () => {}, applyAutostart: () => {},
+      chooseSavePath: async () => out,
+      provider: { name: 'fake', start: async () => {}, stop: async () => {}, readCurrentClipboard: async () => null, markCurrentAsSeen: async () => {}, onClipboardChanged: () => {} },
+    });
+    const data = Uint8Array.from({ length: 12_000_000 }, (_, i) => (i * 17 + (i >> 10)) & 255);
+    const { id } = (await library.capture({ type: 'file', mime: 'x/y', name: 'a.bin', data }))!;
+    expect(await core.saveFile(id)).toBe(true);
+    expect(Buffer.compare(readFileSync(out), data)).toBe(0);
   });
 });

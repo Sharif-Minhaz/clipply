@@ -6,11 +6,12 @@ import { generateDeviceKeys, initCrypto } from '@clipply/crypto';
 import { itemRepo, kvRepo, migrate } from '@clipply/database';
 import { openNodeSqlite } from '@clipply/database/node';
 import { createLogger } from '@clipply/logger';
-import { MAX_THUMB_BYTES } from '@clipply/shared-schemas';
+import { DEFAULT_OCR_LANGUAGES, MAX_THUMB_BYTES } from '@clipply/shared-schemas';
 import { AccountController, ClipLibrary, LinkPreviewer, RELEASES_LATEST, UpdateChecker, uuidv7 } from '@clipply/sync-engine';
 
 import { CH, type DesktopStatus } from '../shared/api';
 import { setAutostart } from './autostart';
+import { fileChunkStore } from './chunkStore';
 import { fileSink } from './logFile';
 import { ElectronClipboardProvider, type ClipboardProvider, type DecodedImage } from './clipboard/provider';
 import { HelperClipboardProvider } from './clipboard/helper';
@@ -75,6 +76,7 @@ async function main(): Promise<void> {
   const userData = app.getPath('userData');
   const dbPath = join(userData, 'clipply.db');
   const vaultPath = join(userData, 'vault.v1');
+  const chunkDir = join(userData, 'chunks');
   const appRoot = app.getAppPath();
   const icon = join(appRoot, 'resources', 'icon.png');
   const startHidden = process.argv.includes('--hidden');
@@ -164,8 +166,8 @@ async function main(): Promise<void> {
   let account: AccountController | null = null;
   const library = vault
     ? new ClipLibrary({
-        db, keyring: () => vault!.keyring, deviceId: vault.deviceId, fetchBlob: (id) => account!.engine.fetchBlob(id),
-        recognizeText: ocr.recognize,
+        db, keyring: () => vault!.keyring, deviceId: vault.deviceId, fetchBlob: (id, chunk) => account!.engine.fetchBlob(id, chunk), chunks: fileChunkStore(chunkDir),
+        recognizeText: (image) => ocr.recognize(image, core?.settings.ocrLanguages ?? DEFAULT_OCR_LANGUAGES),
       })
     : null;
   if (library && vault) {
@@ -286,6 +288,7 @@ async function main(): Promise<void> {
       rmSync(`${dbPath}-wal`, { force: true });
       rmSync(`${dbPath}-shm`, { force: true });
       rmSync(vaultPath, { force: true });
+      rmSync(chunkDir, { recursive: true, force: true });
       relaunch();
       quitting = true;
       app.exit(0);

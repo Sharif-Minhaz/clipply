@@ -119,7 +119,7 @@ Rule of thumb: **if it is not platform I/O, it lives in a package.** Apps only w
 ```
 
 - **The WebView runs the same TypeScript engine as desktop.** Here `ClipplyClient` is implemented directly in `runtime.ts` (no IPC hop) by calling `ClipLibrary`.
-- **Kotlin works without the WebView**: a capture while the app is closed is encrypted straight into `Inbox`, and `UploadWorker` pushes text items over the network. Kotlin re-implements **only** item encryption; output is checked against [packages/crypto/vectors/item-v1.json](../packages/crypto/vectors/item-v1.json).
+- **Kotlin works without the WebView**: a capture while the app is closed is encrypted straight into `Inbox`, and `UploadWorker` pushes text, images and files up to 10 MB over the network. Kotlin re-implements **only** item encryption; output is checked against [packages/crypto/vectors/item-v1.json](../packages/crypto/vectors/item-v1.json).
 
 ### Lifecycle (`runtime.ts` → `boot()`)
 
@@ -178,7 +178,7 @@ vercel.ts (cached MongoClient + app per warm instance)  |  local.ts (dev)
 
 | Local SQLite table (both apps) | Holds |
 |---|---|
-| `items` | `dek` / `meta` / `body` / `thumb` ciphertext, blob ref, `rev`, `seq`, `sync_state`; clear columns only `created_at`, `pinned`, `favorite`, keyed `content_hash` |
+| `items` | `dek` / `meta` / `body` / `thumb` / `ocr` ciphertext, blob ref, chunk refs, `rev`, `seq`, `sync_state`; clear columns only `created_at`, `pinned`, `favorite`, keyed `content_hash` |
 | `outbox` | one pending op per item: `op_id`, `upsert`/`delete`, attempts, `next_attempt_at` |
 | `kv` | sync cursor, device id, preferences — never keys or plaintext |
 | `schema_migrations` | applied migration versions |
@@ -199,7 +199,7 @@ vercel.ts (cached MongoClient + app per warm instance)  |  local.ts (dev)
 
 **Capture (desktop)** — `HelperClipboardProvider` emits a change → `DesktopCore` skips excluded apps / sensitive clips → `ClipLibrary.capture()` (dedupe hash → `crypto/item.ts` encrypt → `itemRepo` + `outboxRepo` in one tx) → `library.subscribe` → `AccountController.notifyLocalChange()` → debounced `SyncEngine.sync()` → `api-client` `POST /v1/sync/push` → `sync/service.ts applyPush` → `clipboard_items` with new `seq`.
 
-**Capture (Android, app closed)** — share / tile / text selection → `Capture.kt saveClip` → `Inbox` (Keystore-encrypted) → `UploadWorker` encrypts text with `ItemCrypto` and pushes it; images wait. On next open `runtime.ts drainInbox()` imports everything through `ClipLibrary` (thumbnails, blob upload).
+**Capture (Android, app closed)** — share / tile / text selection → `Capture.kt saveClip` → `Inbox` (Keystore-encrypted) → `UploadWorker` encrypts text, images and files up to 10 MB with `ItemCrypto` and pushes them; larger files wait. On next open `runtime.ts drainInbox()` imports everything through `ClipLibrary` (thumbnails, blob upload).
 
 **Receive** — scheduler probe → `GET /v1/sync/head` → `GET /v1/sync/pull?cursor=N` → `itemRepo` stores ciphertext → `ClipLibrary` decrypts `meta`/text into memory → `ui` re-renders through `ClipplyClient.subscribe`.
 

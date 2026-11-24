@@ -22,6 +22,8 @@ sealed class Clip {
     data object None : Clip()
     data object Sensitive : Clip()
     data object TooLarge : Clip()
+    /** A large file, already in the inbox in parts. */
+    data object Stored : Clip()
     data class Text(val text: String) : Clip()
     data class Image(val bytes: ByteArray, val mime: String) : Clip()
     data class FileData(val bytes: ByteArray, val mime: String, val name: String) : Clip()
@@ -47,9 +49,10 @@ fun readClip(ctx: Context): Clip {
 fun saveClip(ctx: Context, clip: Clip, source: String): String = when (clip) {
     is Clip.Text -> if (Inbox.addText(ctx, clip.text, source)) "Saved to Clipply" else "Nothing to save"
     is Clip.Image -> if (Inbox.add(ctx, "image", clip.mime, clip.bytes, source)) "Image saved to Clipply" else "Image too large"
-    is Clip.FileData -> if (Inbox.add(ctx, "file", clip.mime, clip.bytes, source, clip.name)) "File saved to Clipply" else "File too large (10 MB max)"
+    is Clip.FileData -> if (Inbox.add(ctx, "file", clip.mime, clip.bytes, source, clip.name)) "File saved to Clipply" else "File too large"
     Clip.Sensitive -> "Sensitive content is not saved"
-    Clip.TooLarge -> "Too large to save (10 MB max)"
+    Clip.Stored -> "File saved to Clipply"
+    Clip.TooLarge -> "Too large to save (100 MB max)"
     Clip.None -> "Clipboard is empty"
 }.also { UploadWorker.enqueue(ctx) }
 
@@ -100,7 +103,7 @@ class ShareActivity : Activity() {
         return saveClip(ctx, uri?.let { stream(ctx, it, i.type) } ?: Clip.None, "share")
     }
 
-    /** A shared image or any other file. Oversize content is not read into memory. */
+    /** A shared image or any other file. Over 10 MB it goes to the inbox in parts, never whole into memory. */
     private fun stream(ctx: Context, uri: Uri, type: String?): Clip? {
         val mime = ctx.contentResolver.getType(uri) ?: type ?: "application/octet-stream"
         var name = "file"
@@ -113,9 +116,18 @@ class ShareActivity : Activity() {
                 }
             }
         }
-        if (size > Inbox.MAX_BYTES) return Clip.TooLarge
-        val bytes = runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() ?: return null
-        return if (mime.startsWith("image/")) Clip.Image(bytes, mime) else Clip.FileData(bytes, mime, name)
+        if (size > Inbox.MAX_LARGE_BYTES) return Clip.TooLarge
+        return runCatching {
+            ctx.contentResolver.openInputStream(uri)?.use { input ->
+                val head = Inbox.readUpTo(input, Inbox.MAX_BYTES + 1)
+                val image = mime.startsWith("image/")
+                when {
+                    head.size > Inbox.MAX_BYTES -> if (Inbox.addLarge(ctx, if (image) "image" else "file", mime, head, input, "share", name)) Clip.Stored else Clip.TooLarge
+                    image -> Clip.Image(head, mime)
+                    else -> Clip.FileData(head, mime, name)
+                }
+            }
+        }.getOrNull()
     }
 }
 

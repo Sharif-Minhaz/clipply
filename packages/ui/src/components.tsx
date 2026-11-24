@@ -2,12 +2,12 @@ import { useRef, useState, type ComponentType, type CSSProperties, type Keyboard
 import { Check, CheckSquare, ChevronLeft, ChevronRight, Code, Copy, Download, File, Maximize2, Image, Link, Pilcrow, ScanText, Search, Square, Star, StarOff, Trash, Type, X, type LucideProps } from 'lucide-react';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
+import { htmlToText } from '@clipply/sync-engine/html';
 
 import { useClipply } from './client';
 import { isPendingId } from './optimistic';
 import { useClipList, useLinkPreview, useThumbUrl } from './hooks';
-import { formatRelative } from './time';
-import { formatBytes } from './viewer';
+import { formatBytes, formatRelative } from './time';
 
 export const KIND_LABEL: Record<ClipKind, string> = {
   text: 'Text', url: 'Link', code: 'Code', html: 'Rich text', image: 'Image', file: 'File',
@@ -187,7 +187,7 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect, on
     <article
       aria-label={`${KIND_LABEL[meta.kind]} item`}
       style={{ '--kind': `var(--color-kind-${meta.kind})` } as CSSProperties}
-      className={`relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 rounded-2xl bg-raised py-3 pr-3 pl-4 ring-1 transition-shadow max-sm:gap-x-2.5 max-sm:gap-y-1 max-sm:py-2.5 max-sm:pr-2.5 max-sm:pl-3.5 ${
+      className={`@container relative grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 rounded-2xl bg-raised py-3 pr-3 pl-4 ring-1 transition-shadow max-sm:gap-x-2.5 max-sm:gap-y-1 max-sm:py-2.5 max-sm:pr-2.5 max-sm:pl-3.5 ${
         selected ? 'ring-2 ring-accent' : 'shadow-[0_1px_2px_rgb(0_0_0/0.04),0_10px_24px_-16px_rgb(8_50_60/0.35)] ring-line/60 hover:shadow-[0_1px_2px_rgb(0_0_0/0.05),0_14px_30px_-14px_rgb(8_50_60/0.4)]'
       }`}
     >
@@ -196,25 +196,30 @@ export function ClipCard({ item, now, deviceName, onOpen, selected, onSelect, on
       <span aria-hidden className="flex size-10 items-center justify-center self-start rounded-xl bg-(--kind)/12 text-(--kind) max-sm:size-8 max-sm:rounded-lg sm:row-span-3 sm:size-11">
         <KindIcon className="size-5 max-sm:size-4" />
       </span>
+      {/* Sized by the card, not the window (a narrow desktop window still has its sidebar): with a device name and no room, the time gets its own line. */}
       <header className="flex min-w-0 items-center gap-2 text-xs text-muted">
-        {onSelect && (selected ? <CheckSquare aria-hidden className="size-4 text-accent" /> : <Square aria-hidden className="size-4" />)}
-        <span className="text-sm font-semibold text-(--kind)">{KIND_LABEL[meta.kind]}</span>
-        {isFavorite(meta) && <Star aria-label="Favorite" className="size-3.5 fill-accent text-accent" />}
-        {meta.title && <span className="truncate font-semibold text-ink">{meta.title}</span>}
-        <span className="ml-auto whitespace-nowrap">
-          {copying || pending ? (
-            <span role="status" className="flex items-center gap-1 font-semibold text-accent">
-              <span aria-hidden className="size-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> {pending ? 'Saving…' : 'Copying…'}
-            </span>
-          ) : copied ? (
-            <span role="status" className="flex items-center gap-1 font-semibold text-accent"><Check aria-hidden className="size-4" /> Copied</span>
-          ) : (
-            <>
-              <time dateTime={new Date(meta.createdAt).toISOString()}>{formatRelative(meta.createdAt, now)}</time>
-              {deviceName && <span>, from {deviceName}</span>}
-            </>
-          )}
-        </span>
+        {onSelect && (selected ? <CheckSquare aria-hidden className="size-4 shrink-0 text-accent" /> : <Square aria-hidden className="size-4 shrink-0" />)}
+        <div className={`flex min-w-0 flex-1 gap-x-2 ${deviceName ? 'flex-col @lg:flex-row @lg:items-center' : 'items-center'}`}>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 text-sm font-semibold text-(--kind)">{KIND_LABEL[meta.kind]}</span>
+            {isFavorite(meta) && <Star aria-label="Favorite" className="size-3.5 shrink-0 fill-accent text-accent" />}
+            {meta.title && <span className="truncate font-semibold text-ink">{meta.title}</span>}
+          </span>
+          <span className={deviceName ? 'min-w-0 truncate @lg:ml-auto' : 'ml-auto shrink-0 whitespace-nowrap'}>
+            {copying || pending ? (
+              <span role="status" className="flex items-center gap-1 font-semibold text-accent">
+                <span aria-hidden className="size-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" /> {pending ? 'Saving…' : 'Copying…'}
+              </span>
+            ) : copied ? (
+              <span role="status" className="flex items-center gap-1 font-semibold text-accent"><Check aria-hidden className="size-4" /> Copied</span>
+            ) : (
+              <>
+                <time dateTime={new Date(meta.createdAt).toISOString()}>{formatRelative(meta.createdAt, now)}</time>
+                {deviceName && <span title={`Copied on ${deviceName}`}>, from {deviceName}</span>}
+              </>
+            )}
+          </span>
+        </div>
         {onOpen && !onSelect && !pending && <span className="-my-1"><IconButton icon={Maximize2} label="Expand" onClick={() => onOpen(item)} /></span>}
       </header>
 
@@ -297,13 +302,6 @@ export function IconButton(props: {
 }
 
 const TEXT_KINDS: ReadonlySet<ClipKind> = new Set(['text', 'url', 'code', 'html']);
-
-/** Plain text of copied HTML. DOMParser builds an inert document: no scripts run, nothing loads. */
-function htmlText(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  doc.querySelectorAll('script, style').forEach((el) => el.remove());
-  return (doc.body.textContent ?? '').replace(/\s+/g, ' ').trim();
-}
 
 /**
  * Arrow keys move between clips (Up from the first one returns to the search field); Enter/Space then
@@ -389,7 +387,7 @@ export function ClipList(props: {
     const texts: string[] = [];
     for (const id of ids) {
       const body = new TextDecoder().decode(await client.readBody(id));
-      texts.push(items.find((i) => i.id === id)?.meta.kind === 'html' ? htmlText(body) : body.trimEnd());
+      texts.push(items.find((i) => i.id === id)?.meta.kind === 'html' ? htmlToText(body) : body.trimEnd());
     }
     await client.copyText(texts.join('\n'));
   };
@@ -420,7 +418,7 @@ export function ClipList(props: {
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((item) => (
             <li key={item.id}>
-              <MediaTile item={item} now={now} onOpen={onOpen} {...(selected ? { selected: selected.has(item.id), onSelect: () => toggle(item.id) } : {})} />
+              <MediaTile item={item} now={now} deviceName={deviceNames[item.meta.originDeviceId]} onOpen={onOpen} {...(selected ? { selected: selected.has(item.id), onSelect: () => toggle(item.id) } : {})} />
             </li>
           ))}
         </ul>
@@ -458,7 +456,7 @@ export function ClipList(props: {
  * favorite and delete. Delete is the same library removal as the list, so the clip also leaves the
  * Clipboard tab and the deletion syncs to other devices. Clicking the preview opens the viewer.
  */
-export function MediaTile({ item, now, onOpen, selected, onSelect }: Omit<CardProps, 'deviceName'>) {
+export function MediaTile({ item, now, deviceName, onOpen, selected, onSelect }: CardProps) {
   const client = useClipply();
   const { meta } = item;
   const isFile = meta.kind === 'file';
@@ -525,6 +523,7 @@ export function MediaTile({ item, now, onOpen, selected, onSelect }: Omit<CardPr
               <>{formatBytes(meta.size)} · <time dateTime={new Date(meta.createdAt).toISOString()}>{formatRelative(meta.createdAt, now)}</time></>
             )}
           </p>
+          {deviceName && <p className="truncate text-xs text-muted" title={`Copied on ${deviceName}`}>from {deviceName}</p>}
         </div>
       </button>
       {onSelect ? (

@@ -19,7 +19,7 @@ function ocrAssets(): Plugin {
       for (const v of ['tesseract-core-relaxedsimd', 'tesseract-core-simd', 'tesseract-core']) {
         this.emitFile({ type: 'asset', fileName: `${v}.wasm`, source: readFileSync(join(core, `${v}.wasm`)) });
       }
-      for (const lang of ['ben', 'eng']) {
+      for (const lang of ['ben', 'ara', 'hin', 'jpn', 'eng']) {
         const file = `${lang}.traineddata.gz`;
         const data = join(dirname(require.resolve(`@tesseract.js-data/${lang}`)), '4.0.0_best_int', file);
         this.emitFile({ type: 'asset', fileName: file, source: readFileSync(data) });

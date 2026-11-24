@@ -44,7 +44,7 @@ export async function runGc(store: Store, destroy: (key: string) => Promise<bool
   while (clock() < deadline) {
     const candidates = await store.c.objects.find({ status: 'uploaded', updatedAt: { $lt: orphanCutoff } }).limit(batch).toArray();
     for (const o of candidates) {
-      const live = await store.c.items.countDocuments({ _id: `${o.userId}:${o.itemId}`, deleted: false, 'item.blob.key': o._id }, { limit: 1 });
+      const live = await store.c.items.countDocuments({ _id: `${o.userId}:${o.itemId}`, deleted: false, $or: [{ 'item.blob.key': o._id }, { 'item.chunks.key': o._id }] }, { limit: 1 });
       // `status: 'uploaded'` in the filter loses to a push attaching it concurrently (see applyOne).
       const r = await store.c.objects.updateOne(
         { _id: o._id, status: 'uploaded' },

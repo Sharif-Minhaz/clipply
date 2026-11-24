@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiClient, type ApiClient } from '@clipply/api-client';
 import { createKeyring, fromUtf8, generateDeviceKeys, toB64, utf8, type Keyring } from '@clipply/crypto';
 import { itemRepo, kvRepo, migrate, outboxRepo, type SqlDb } from '@clipply/database';
 import { openTestDb } from '@clipply/database/testing';
 import { createLogger } from '@clipply/logger';
 import {
-  acceptEnrollment, approveDevice, ClipLibrary, createAccountVault, refreshKeyring, SyncEngine,
-  type BlobUploader, type DeviceIdentity,
+  acceptEnrollment, approveDevice, ClipLibrary, createAccountVault, MAX_CAPTURE_BYTES, memoryChunkStore, refreshKeyring, SYNC_CURSOR, SyncEngine,
+  type BlobUploader, type ChunkStore, type DeviceIdentity,
 } from '@clipply/sync-engine';
 
+import { runGc } from '../src/modules/maintenance/gc';
 import { signParams } from '../src/modules/storage/cloudinary';
 import { startHarness, type Harness } from './helpers';
 
@@ -22,7 +23,9 @@ const cloud = new Map<string, Uint8Array>();
 const log = createLogger('sync-test', { sink: () => {} });
 
 /** Stands in for Cloudinary: keeps ciphertext in memory and signs responses like Cloudinary does. */
+let failUploadAfter = Infinity;
 const uploadBlob: BlobUploader = async (_url, fields, ciphertext) => {
+  if (failUploadAfter-- <= 0) throw new Error('connection lost');
   cloud.set(fields.public_id!, ciphertext.slice());
   return { public_id: fields.public_id!, version: 1, bytes: ciphertext.length, signature: signParams({ public_id: fields.public_id!, version: 1 }, 'cloud-secret') };
 };
@@ -39,6 +42,10 @@ beforeAll(async () => {
   server = createServer(h.app).listen(0);
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
+// The injected clock stands still, so each test gets its own rate-limit window.
+beforeEach(() => {
+  h.clock.now += 61_000;
+});
 afterAll(async () => {
   server?.close();
   await h?.close();
@@ -51,6 +58,7 @@ interface Sim {
   ring: Keyring;
   lib: ClipLibrary;
   engine: SyncEngine;
+  chunks: ChunkStore;
   pub: { boxPublicKey: string; signPublicKey: string };
   offline: boolean;
 }
@@ -59,7 +67,7 @@ async function device(sub: string): Promise<Sim> {
   const keys = generateDeviceKeys();
   const me = { deviceId: randomUUID(), keys };
   const pub = { boxPublicKey: toB64(keys.box.publicKey), signPublicKey: toB64(keys.sign.publicKey) };
-  const sim = { me, pub, offline: false, ring: createKeyring() } as Sim;
+  const sim = { me, pub, offline: false, ring: createKeyring(), chunks: memoryChunkStore() } as Sim;
   let token: string | null = null;
   const netFetch: typeof fetch = async (input, init) => {
     if (sim.offline) throw new TypeError('fetch failed');
@@ -72,7 +80,7 @@ async function device(sub: string): Promise<Sim> {
   })).accessToken;
   sim.db = openTestDb();
   await migrate(sim.db);
-  sim.lib = new ClipLibrary({ db: sim.db, keyring: () => sim.ring, deviceId: me.deviceId, fetchBlob: (id) => sim.engine.fetchBlob(id) });
+  sim.lib = new ClipLibrary({ db: sim.db, keyring: () => sim.ring, deviceId: me.deviceId, fetchBlob: (id, chunk) => sim.engine.fetchBlob(id, chunk), chunks: sim.chunks });
   sim.engine = new SyncEngine({
     db: sim.db, api: sim.api, library: sim.lib, uploadBlob, downloadBlob, log,
     onKeyringStale: async () => {
@@ -159,6 +167,124 @@ describe('two-device synchronization', () => {
     await a.lib.readBody(images[0]!);
     expect(downloads - before).toBe(1);
     await a.lib.remove([...images, ...texts]);
+    await syncBoth(a, b);
+  });
+
+  it('syncs flags of an image whose body was never downloaded here', async () => {
+    const png = Uint8Array.from({ length: 9_000 }, (_, i) => (i * 7) % 251);
+    const { id } = (await b.lib.capture({ type: 'image', mime: 'image/png', data: png, thumb: utf8('t'), pixels: png }))!;
+    await b.engine.sync();
+    await a.engine.sync();
+    await a.engine.prefetchImages();
+    await itemRepo(a.db).put({ ...(await itemRepo(a.db).get(id))!, body: null });
+    await a.lib.setFlags(id, { favorite: true });
+    await syncBoth(a, b);
+    expect(b.lib.get(id)!.meta.favorite).toBe(true);
+    expect(await b.lib.readBody(id)).toEqual(png);
+    await a.lib.remove([id]);
+    await syncBoth(a, b);
+  });
+
+  it('syncs all recognized text, and keeps it when an older app pushes without it', async () => {
+    const text = `${'word '.repeat(1500)}the end`;
+    const png = Uint8Array.from({ length: 9_000 }, (_, i) => (i * 11) % 251);
+    const { id } = (await b.lib.capture({ type: 'image', mime: 'image/png', data: png, thumb: utf8('t'), pixels: png }))!;
+    await b.lib.setFlags(id, {});
+    const scanning = new ClipLibrary({ db: b.db, keyring: () => b.ring, deviceId: b.me.deviceId, recognizeText: async () => text });
+    await scanning.load();
+    await scanning.recognize(id);
+    await syncBoth(a, b);
+    expect(a.lib.list({ query: 'the end' }).map((v) => v.id)).toEqual([id]);
+
+    // What an app from before the `ocr` part sends when the user stars the image.
+    const item = (await a.api.getItem(id)) as Extract<Awaited<ReturnType<ApiClient['getItem']>>, { deleted: false }>;
+    const { ocr, ...older } = item.item;
+    expect(ocr).toBeDefined();
+    const res = await a.api.push({ ops: [{ type: 'upsert', opId: randomUUID(), baseRev: item.rev, item: older }] });
+    expect(res.results[0]!.status).toBe('applied');
+    await syncBoth(a, b);
+    expect(await b.lib.readOcr(id)).toBe(text);
+    expect((await a.api.getItem(id)) as object).toMatchObject({ item: { ocr } });
+    await a.lib.remove([id]);
+    await syncBoth(a, b);
+  });
+
+  it('syncs a file over 10 MB in chunks: resumes an interrupted upload, survives an older app, and is deleted whole', async () => {
+    const data = Uint8Array.from({ length: MAX_CAPTURE_BYTES + 3_000_000 }, (_, i) => (i * 13 + (i >> 9)) & 255);
+    const { id } = (await b.lib.capture({ type: 'file', mime: 'video/mp4', name: 'trip.mp4', data }))!;
+    const { id: small } = (await b.lib.capture({ type: 'text', text: 'not held up by the upload' }))!;
+    const blobs = cloud.size;
+    failUploadAfter = 2;
+    await b.engine.sync();
+    failUploadAfter = Infinity;
+    expect(cloud.size).toBe(blobs + 2);
+    await a.engine.sync();
+    expect(a.lib.get(small)).toBeDefined();
+    expect(a.lib.get(id)).toBeUndefined();
+
+    await b.db.run('UPDATE outbox SET next_attempt_at = 0');
+    await b.engine.sync();
+    expect(cloud.size).toBe(blobs + 4);
+    await a.engine.sync();
+    expect(a.lib.get(id)!.meta).toMatchObject({ kind: 'file', size: data.length, file: { name: 'trip.mp4' } });
+    // Only downloaded when opened.
+    expect(await a.chunks.ids()).toEqual([]);
+    expect(Buffer.compare(await a.lib.readBody(id), data)).toBe(0);
+    for (const blob of cloud.values()) expect(Buffer.from(blob).includes(Buffer.from(data.subarray(0, 64)))).toBe(false);
+
+    // Starred by an app that does not know chunks: the server keeps them.
+    const item = (await a.api.getItem(id)) as Extract<Awaited<ReturnType<ApiClient['getItem']>>, { deleted: false }>;
+    const { chunks, ...older } = item.item;
+    expect(chunks).toHaveLength(4);
+    await a.api.push({ ops: [{ type: 'upsert', opId: randomUUID(), baseRev: item.rev, item: older }] });
+    await syncBoth(a, b);
+    expect((await itemRepo(b.db).get(id))!.chunks).toEqual(chunks);
+
+    // The sweep does not mistake the other chunks for orphans.
+    const objects = await h.store.c.objects.find({ itemId: id }).toArray();
+    expect(objects.filter((o) => o.status === 'attached')).toHaveLength(4);
+    await h.store.c.objects.updateMany({ itemId: id }, { $set: { status: 'uploaded', updatedAt: new Date(0) } });
+    await runGc(h.store, async () => true, h.clock.now, log);
+    expect(await h.store.c.objects.countDocuments({ itemId: id, status: 'attached' })).toBe(4);
+
+    await a.lib.remove([id, small]);
+    expect(await a.chunks.ids()).toEqual([]);
+    await syncBoth(a, b);
+    expect(await b.chunks.ids()).toEqual([]);
+    expect(await h.store.c.objects.countDocuments({ itemId: id, status: 'attached' })).toBe(0);
+  });
+
+  it('keeps large files on the device while the server does not support them', async () => {
+    const { id } = (await b.lib.capture({ type: 'file', mime: 'x/y', name: 'big.bin', data: new Uint8Array(MAX_CAPTURE_BYTES + 1) }))!;
+    const head = b.api.syncHead;
+    (b.api as { syncHead: typeof head }).syncHead = async () => ({ ...(await head()), features: [] });
+    const blobs = cloud.size;
+    await b.engine.sync();
+    (b.api as { syncHead: typeof head }).syncHead = head;
+    expect(cloud.size).toBe(blobs);
+    expect((await outboxRepo(b.db).forItem(id))!.lastError).toMatch(/does not support files over 10 MB/);
+    await b.lib.remove([id]);
+  });
+
+  it('splits a pull into pages the host can send', async () => {
+    for (let n = 0; n < 60; n++) {
+      const png = Uint8Array.from({ length: 3_000 }, (_, i) => (i * n) % 251);
+      await b.lib.capture({ type: 'image', mime: 'image/png', data: png, thumb: new Uint8Array(40_000).fill(n), pixels: png });
+    }
+    while ((await outboxRepo(b.db).pendingCount()) > 0) expect((await b.engine.sync()).failed).toBe(0);
+    const page = await a.api.pull(0, 200);
+    expect(JSON.stringify(page).length).toBeLessThan(4_000_000);
+    expect(page.hasMore).toBe(true);
+    await a.engine.sync();
+    expect(a.lib.stats().count).toBe(b.lib.stats().count);
+
+    // A new device pages through all of it even though old deletes were purged meanwhile.
+    await h.store.c.users.updateMany({}, { $max: { purgeFloor: (await a.api.syncHead()).seq - 1 } });
+    await kvRepo(a.db).set(SYNC_CURSOR, 0);
+    expect((await a.engine.sync()).failed).toBe(0);
+    expect(await kvRepo(a.db).get(SYNC_CURSOR)).toBe((await a.api.syncHead()).seq);
+    await h.store.c.users.updateMany({}, { $set: { purgeFloor: 0 } });
+    await b.lib.clear(['image']);
     await syncBoth(a, b);
   });
 

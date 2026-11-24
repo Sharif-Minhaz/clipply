@@ -2,9 +2,10 @@ import { toB64 } from '@clipply/crypto';
 import { kvRepo, outboxRepo, type OutboxRow, type SqlDb } from '@clipply/database';
 import type { ApiClient } from '@clipply/api-client';
 import type { Logger } from '@clipply/logger';
-import { INLINE_BODY_MAX, MAX_PUSH_OPS, type EncryptedItem, type PushOp, type PushResult } from '@clipply/shared-schemas';
+import { INLINE_BODY_MAX, MAX_PUSH_OPS, MAX_SYNC_BYTES, type BlobRef, type EncryptedItem, type PushOp, type PushResult, type ServerFeature } from '@clipply/shared-schemas';
+import type { ItemRow } from '@clipply/database';
 
-import type { ClipLibrary } from './library';
+import { MAX_CAPTURE_BYTES, type ClipLibrary } from './library';
 
 export type SyncApi = Pick<ApiClient, 'syncHead' | 'pull' | 'push' | 'uploadSignature' | 'confirmUpload' | 'downloadUrl'>;
 
@@ -90,7 +91,7 @@ export class SyncEngine {
    */
   prefetchImages(): Promise<void> {
     this.prefetching = this.prefetching.then(async () => {
-      const recent = this.d.library.list({ limit: PREFETCH_WINDOW }).filter((v) => v.meta.kind === 'image');
+      const recent = this.d.library.list({ limit: PREFETCH_WINDOW }).filter((v) => v.meta.kind === 'image' && v.meta.size <= MAX_CAPTURE_BYTES);
       for (const v of recent.slice(0, PREFETCH_IMAGES)) {
         // A failure is not retried here: Copy/preview still downloads on demand.
         await this.d.library.cacheBody(v.id).catch((error: unknown) => this.d.log.warn('image prefetch failed', { itemId: v.id, error }));
@@ -99,21 +100,31 @@ export class SyncEngine {
     return this.prefetching;
   }
 
-  /** Fetches a blob body's ciphertext for ClipLibrary.readBody. */
-  async fetchBlob(id: string): Promise<Uint8Array> {
-    const { url } = await this.d.api.downloadUrl(id);
+  /** Fetches a blob body's ciphertext (or one chunk of it) for ClipLibrary.readBody. */
+  async fetchBlob(id: string, chunk?: number): Promise<Uint8Array> {
+    const { url } = await this.d.api.downloadUrl(id, chunk);
     return this.d.downloadBlob(url);
   }
 
   private async run(): Promise<SyncReport> {
     const report: SyncReport = { pushed: 0, conflicts: 0, pulled: 0, failed: 0 };
+    this.features = null;
     await this.push(report);
     await this.pull(report);
     // Ops created by pulls (duplicate cleanup) go out in the same run.
     if ((await outboxRepo(this.d.db).due(this.now(), 1)).length > 0) await this.push(report);
     this.d.log.info('sync finished', { ...report });
     if (report.pulled > 0) void this.prefetchImages();
+    void this.d.library.indexLargeText();
     return report;
+  }
+
+  private features: readonly string[] | null = null;
+
+  /** Asked once per run, so an upgraded server is noticed without restarting the app. */
+  private async serverHas(feature: ServerFeature): Promise<boolean> {
+    this.features ??= (await this.d.api.syncHead()).features;
+    return this.features.includes(feature);
   }
 
   private async push(report: SyncReport): Promise<void> {
@@ -121,60 +132,107 @@ export class SyncEngine {
     for (;;) {
       const due = await outbox.due(this.now(), MAX_PUSH_OPS);
       if (due.length === 0) return;
-      const ops: Array<{ row: OutboxRow; op: PushOp }> = [];
-      for (const row of due) {
+      // Large files last: uploading their chunks takes a while and must not hold back small clips.
+      const large = (r: OutboxRow): boolean => r.type === 'upsert' && (this.d.library.get(r.itemId)?.meta.size ?? 0) > MAX_CAPTURE_BYTES;
+      let ops: Array<{ row: OutboxRow; op: PushOp }> = [];
+      let bytes = 0;
+      for (const row of [...due.filter((r) => !large(r)), ...due.filter(large)]) {
+        if (large(row) && ops.length > 0) {
+          if (!(await this.send(ops, report))) return;
+          ops = [];
+          bytes = 0;
+        }
         try {
           const op = await this.buildOp(row);
-          if (op) ops.push({ row, op });
-          else await outbox.complete(row.opId);
+          if (!op) {
+            await outbox.complete(row.opId);
+            continue;
+          }
+          const size = JSON.stringify(op).length;
+          if (ops.length > 0 && bytes + size > MAX_SYNC_BYTES) {
+            if (!(await this.send(ops, report))) return;
+            ops = [];
+            bytes = 0;
+          }
+          ops.push({ row, op });
+          bytes += size;
         } catch (error) {
           await this.fail(row, error, report);
         }
       }
-      if (ops.length === 0) continue;
-
-      let results: PushResult[];
-      try {
-        results = (await this.d.api.push({ ops: ops.map((o) => o.op) })).results;
-      } catch (error) {
-        for (const o of ops) await this.fail(o.row, error, report);
-        return;
-      }
-      for (const [i, result] of results.entries()) {
-        const { row } = ops[i]!;
-        await this.handleResult(row, result, report);
-      }
+      if (!(await this.send(ops, report))) return;
     }
+  }
+
+  /** Pushes one batch and applies its results; false when the request itself failed. */
+  private async send(ops: ReadonlyArray<{ row: OutboxRow; op: PushOp }>, report: SyncReport): Promise<boolean> {
+    if (ops.length === 0) return true;
+    let results: PushResult[];
+    try {
+      results = (await this.d.api.push({ ops: ops.map((o) => o.op) })).results;
+    } catch (error) {
+      for (const o of ops) await this.fail(o.row, error, report);
+      return false;
+    }
+    for (const [i, result] of results.entries()) await this.handleResult(ops[i]!.row, result, report);
+    return true;
   }
 
   private async buildOp(row: OutboxRow): Promise<PushOp | null> {
     if (row.type === 'delete') return { type: 'delete', opId: row.opId, itemId: row.itemId };
     const item = await this.d.library.row(row.itemId);
-    if (!item || item.deleted || !item.body) return null;
-    const bodyB64 = toB64(item.body);
-    const base = { id: item.id, encVersion: 1 as const, keyEpoch: item.keyEpoch, dek: toB64(item.dek), meta: toB64(item.meta) };
+    // A body that is only on the server (an image never opened here) still syncs flag changes, by its blob.
+    if (!item || item.deleted || (!item.body && !item.blobKey && !item.chunks)) return null;
+    const base = {
+      id: item.id, encVersion: 1 as const, keyEpoch: item.keyEpoch, dek: toB64(item.dek), meta: toB64(item.meta),
+      ...(item.ocr ? { ocr: toB64(item.ocr) } : {}),
+    };
+    const bodyB64 = item.body && item.body.length <= INLINE_BODY_MAX ? toB64(item.body) : null;
     // Images always travel as a blob so their encrypted thumbnail can ride along inline.
-    const inline = bodyB64.length <= INLINE_BODY_MAX && !item.thumb;
-    let wire: EncryptedItem;
-    if (inline) {
-      wire = { ...base, body: bodyB64 };
-    } else {
-      let key = item.blobKey;
-      let size = item.blobSize;
-      if (!key || !size) {
-        const sig = await this.d.api.uploadSignature({ itemId: item.id, size: item.body.length });
-        const uploaded = await this.d.uploadBlob(sig.uploadUrl, sig.fields, item.body);
-        await this.d.api.confirmUpload({ key: sig.key, upload: uploaded });
-        await this.d.library.setBlobRef(item.id, sig.key, item.body.length);
-        key = sig.key;
-        size = item.body.length;
-      }
-      // A thumbnail over the wire limit (made before thumbnails were size-capped) is left out rather than
-      // failing the push forever; other devices then show a placeholder until the image is opened.
-      const thumb = item.thumb ? toB64(item.thumb) : undefined;
-      wire = { ...base, blob: { key, size }, ...(thumb && thumb.length <= INLINE_BODY_MAX ? { thumb } : {}) };
+    if (bodyB64 !== null && bodyB64.length <= INLINE_BODY_MAX && !item.thumb) {
+      return { type: 'upsert', opId: row.opId, baseRev: item.rev, item: { ...base, body: bodyB64 } };
     }
+    // A thumbnail over the wire limit (made before thumbnails were size-capped) is left out rather than
+    // failing the push forever; other devices then show a placeholder until the image is opened.
+    const thumb = item.thumb ? toB64(item.thumb) : undefined;
+    const wire: EncryptedItem = {
+      ...base,
+      ...(item.chunks ? await this.uploadChunks(item) : { blob: await this.uploadBody(item) }),
+      ...(thumb && thumb.length <= INLINE_BODY_MAX ? { thumb } : {}),
+    };
     return { type: 'upsert', opId: row.opId, baseRev: item.rev, item: wire };
+  }
+
+  private async uploadBody(item: ItemRow): Promise<BlobRef> {
+    if (item.blobKey && item.blobSize) return { key: item.blobKey, size: item.blobSize };
+    const ref = await this.upload(item.id, item.body!);
+    await this.d.library.setBlobRef(item.id, ref.key, ref.size);
+    return ref;
+  }
+
+  /** Uploads the chunks that are not on the server yet; each one is recorded, so a retry continues. */
+  private async uploadChunks(item: ItemRow): Promise<{ blob: BlobRef; chunks: BlobRef[] }> {
+    if (!(await this.serverHas('chunks'))) throw new Error('this server does not support files over 10 MB yet');
+    const chunks: BlobRef[] = [];
+    for (const [i, done] of item.chunks!.entries()) {
+      if (done) {
+        chunks.push(done);
+        continue;
+      }
+      const data = await this.d.library.readChunk(item.id, i);
+      if (!data) throw new Error(`part ${i + 1} of the file is missing on this device`);
+      const ref = await this.upload(item.id, data);
+      await this.d.library.setChunkRef(item.id, i, ref);
+      chunks.push(ref);
+    }
+    return { blob: chunks[0]!, chunks };
+  }
+
+  private async upload(itemId: string, ciphertext: Uint8Array): Promise<BlobRef> {
+    const sig = await this.d.api.uploadSignature({ itemId, size: ciphertext.length });
+    const uploaded = await this.d.uploadBlob(sig.uploadUrl, sig.fields, ciphertext);
+    await this.d.api.confirmUpload({ key: sig.key, upload: uploaded });
+    return { key: sig.key, size: ciphertext.length };
   }
 
   private async handleResult(row: OutboxRow, result: PushResult, report: SyncReport): Promise<void> {
@@ -213,15 +271,18 @@ export class SyncEngine {
     const kv = kvRepo(this.d.db);
     let cursor = (await kv.get<number>(SYNC_CURSOR)) ?? 0;
     let seen: Set<string> | null = null;
+    // Later pages of a pull from 0 can end below the server's purge floor; without saying so they would restart it forever.
+    let full = cursor === 0;
     for (;;) {
       let page;
       try {
-        page = await this.d.api.pull(cursor);
+        page = await this.d.api.pull(cursor, undefined, full && cursor > 0);
       } catch (error) {
         if ((error as { kind?: string }).kind === 'gone') {
           // Tombstones older than our cursor were purged server-side; start over from 0.
           this.d.log.warn('cursor expired, full resync', {});
           cursor = 0;
+          full = true;
           seen = new Set();
           await kv.set(SYNC_CURSOR, 0);
           continue;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import logo from './logo.png';
 import { Clipboard, Images, Laptop, Pause, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, AppVersion, ClipList, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
+import { AddClip, AppVersion, ClipList, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice, useDeviceNames } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -101,6 +101,7 @@ function HistoryScreen({ base, empty, grid }: { base: ListFilter; empty: string;
   const [kinds, setKinds] = useState<ClipKind[]>([]);
   const [open, setOpen] = useState<{ item: ClipView; action: 'scan' | undefined } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const deviceNames = useDeviceNames(window.clipply.account);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -136,9 +137,9 @@ function HistoryScreen({ base, empty, grid }: { base: ListFilter; empty: string;
     <div className="pb-8">
       <SearchStrip query={query} onQuery={setQuery} kinds={kinds} onKinds={setKinds} inputRef={searchRef} searchShortcut="Ctrl F" action={<SyncButton account={window.clipply.account} />} {...(base.kinds ? { kindOptions: base.kinds } : {})} />
       <div className={`mx-auto px-6 pt-2 ${grid ? 'max-w-6xl' : 'max-w-[calc(48rem+3rem)]'}`}>
-        <ClipList filter={filter} onOpen={(item, action) => setOpen({ item, action })} emptyText={empty} deviceNames={{}} layout={grid ? 'grid' : 'list'} onPick={() => void window.clipply.hideWindow()} />
+        <ClipList filter={filter} onOpen={(item, action) => setOpen({ item, action })} emptyText={empty} deviceNames={deviceNames} layout={grid ? 'grid' : 'list'} onPick={() => void window.clipply.hideWindow()} />
       </div>
-      {open && <ItemViewer item={open.item} action={open.action} onClose={() => setOpen(null)} />}
+      {open && <ItemViewer item={open.item} deviceName={deviceNames[open.item.meta.originDeviceId]} action={open.action} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && <AddClip />}
     </div>
   );

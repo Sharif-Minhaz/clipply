@@ -26,6 +26,10 @@ export interface ClipplyClient {
   copyText(text: string): Promise<void>;
   /** Recognizes the text in an image item on this device and stores it with the item; resolves with the text. */
   recognizeText(id: string): Promise<string>;
+  /** All text recognized in an image so far ('' = scanned, none found); null when it was never scanned. */
+  imageText(id: string): Promise<string | null>;
+  /** Groups of text clips that say nearly the same; the first of each is the one to keep. */
+  similarTexts(): Promise<ClipView[][]>;
   /** Saves the item's contents to a file the user picks (files, images); false when cancelled. */
   saveFile(id: string): Promise<boolean>;
   setFlags(id: string, flags: { pinned?: boolean; favorite?: boolean; title?: string }): Promise<void>;

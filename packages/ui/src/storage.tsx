@@ -3,8 +3,8 @@ import type { ClipKind } from '@clipply/shared-schemas';
 import type { StorageStats } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
+import { formatBytes } from './time';
 import { buttonClass } from './settings';
-import { formatBytes } from './viewer';
 
 const LABEL: Record<ClipKind, string> = { text: 'Text', url: 'Links', html: 'Rich text', code: 'Code', image: 'Images', file: 'Files' };
 
@@ -104,7 +104,7 @@ export function BackupPanel({ actions }: { actions: BackupActions }) {
           disabled={busy || !long || confirm !== passphrase}
           onClick={() => run(async () => {
             const r = await actions.exportBackup(passphrase);
-            return r && `Exported ${r.count} items${r.skipped ? ` (${r.skipped} not available offline were skipped)` : ''}.`;
+            return r && `Exported ${r.count} items${r.skipped ? ` (${r.skipped} skipped: over 10 MB, or not available offline)` : ''}.`;
           })}
           className={buttonClass.plain}
         >

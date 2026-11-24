@@ -20,11 +20,11 @@ Both apps share one UI (`packages/ui`). Screenshots use demo data.
 | ![Clipply on Ubuntu: sidebar, search field with the Ctrl F hint, type filters and the clip list; image clips have a scan button](docs/screenshots/desktop-ui.png) | ![Clipply on Android: search header, type filters, clip list with a scan button on the image clip, and bottom navigation](docs/screenshots/android-ui.png) |
 | The global shortcut opens the window ready to type. Ctrl+F or `/` focuses search, the arrow keys move between clips, and Enter copies and hides the window so you can paste | Capture on app open, share sheet, text selection, Quick Settings tile and screenshots |
 | ![Image viewer on Ubuntu scanning a receipt for text](docs/screenshots/desktop-image-scan.png) | ![Text viewer on Android after the Title Case transform, with Save, Cancel and the Transform menu](docs/screenshots/android-transform.png) |
-| **Copy text** in the viewer, or the scan button on an image card, recognizes the text on the device (OCR, never automatic) | Transform text before saving: trim, join lines, change case, format or minify JSON, remove link tracking |
+| **Copy text** in the viewer, or the scan button on an image card, recognizes the text on the device (OCR, never automatic). English and Bengali are on; Arabic, Hindi and Japanese can be added in Settings | Transform text before saving: trim, join lines, change case, format or minify JSON, remove link tracking |
 | ![Recognized receipt text in an editable box under the image, with Close and Copy text](docs/screenshots/desktop-image-text.png) | ![End of the first page on Android: Previous, 1–50 of 120, Next](docs/screenshots/android-pages.png) |
 | The text is copied, stored encrypted with the clip (so search finds it), and opens in an editable box: fix it and copy again | History is paged: 100 clips per page on desktop, 50 on Android, and only the current page is loaded into the UI |
 
-In selection mode, **Copy as text** joins the selected text clips (in the order you picked them) into one clipboard entry.
+In selection mode, **Copy as text** joins the selected text clips (in the order you picked them) into one clipboard entry. Files open inside Clipply (PDF, images, audio, video, CSV, text), rich text is shown formatted, and **Settings → Similar clips** finds near-duplicate texts and images.
 
 ---
 
@@ -111,7 +111,7 @@ Key hierarchy:
 
 - **Device key-pair** (X25519 + Ed25519): created on each device, never leaves its secure storage.
 - **Keyring** (only on your devices): vault keys per epoch (random 256-bit, a new one after each device removal), the roster of authorized devices and their public keys, and the recovery public keys.
-- **Per item:** a fresh random 256-bit DEK encrypts `meta`, `body` and `thumb`; the DEK is stored encrypted with the current vault key. Each ciphertext is bound to `clipply/v1/<itemId>/<field>` as associated data, so the server cannot swap fields or items.
+- **Per item:** a fresh random 256-bit DEK encrypts `meta`, `body`, `thumb` and recognized text (`ocr`); files over 10 MB (up to 100 MB) are encrypted and uploaded in 4 MB chunks; the DEK is stored encrypted with the current vault key. Each ciphertext is bound to `clipply/v1/<itemId>/<field>` as associated data, so the server cannot swap fields or items.
 - **Recovery key** (256-bit, 55 characters, shown once): derives a key-pair that opens a server-held copy of the keyring sealed to it.
 
 Flow: the copying device encrypts locally, writes the ciphertext and an outbox row in one SQLite transaction, then pushes. Images and files upload directly to Cloudinary with an API-issued signature. Other devices pull, unwrap the DEK with the vault key of the item's `keyEpoch`, and decrypt `meta` and text into an in-memory index. Blobs are fetched on demand via a 10-minute signed URL and decrypted in memory; plaintext is never written to disk.
@@ -224,8 +224,9 @@ On start, then at most once a day on focus, each app sends one anonymous `GET ht
 - The server can withhold changes or replay an older item version; it cannot read or forge content.
 - A removed device colluding with the server could briefly target a device that has not synced since the removal.
 - A pairing QR code seen by someone else is as sensitive as the 12-digit code; it expires after 10 minutes and is single-use.
-- Backups (export/import) use PBKDF2-SHA256 with 600,000 iterations; a weak passphrase is the weak point.
-- Android: no push notifications; new items appear when you open the app. Images captured while the app is closed upload on next open (text uploads immediately).
+- Backups (export/import) use PBKDF2-SHA256 with 600,000 iterations; a weak passphrase is the weak point. Files over 10 MB are not included.
+- Files over 10 MB need a server of at least this version and reach other devices only on this app version or newer; older apps list them but cannot open them.
+- Android: no push notifications; new items appear when you open the app. Text, images and files up to 10 MB captured while the app is closed upload in the background; larger files and very large photos (over 24 megapixels) upload when you open it.
 - GNOME Wayland: copies from native Wayland apps cannot be attributed, so "excluded apps" works only for X11/XWayland windows.
 
 Full threat model: [docs/encryption.md §8](docs/encryption.md#8-threat-model).

@@ -46,13 +46,13 @@ The vault keyring and device private keys are wrapped with a non-exportable AES-
 | Keys / session | `SecureStore.kt` | AES-256-GCM key in Android Keystore; files in `noBackupFilesDir`; backup and device transfer disabled |
 | Capture inbox | `Inbox.kt` | Keystore-encrypted entries; drained into history on app start/resume or immediately if the app is running |
 | Foreground read | `MainActivity.onWindowFocusChanged` → JS `windowFocus` | Skips `EXTRA_IS_SENSITIVE` clips; self-writes ignored |
-| Share / text selection | `ShareActivity` | `SEND` (text, any file), `SEND_MULTIPLE` (any files), `PROCESS_TEXT`; files over 10 MB are refused by size before reading |
+| Share / text selection | `ShareActivity` | `SEND` (text, any file), `SEND_MULTIPLE` (any files), `PROCESS_TEXT`; files over 10 MB go to the inbox in 4 MB Keystore-encrypted parts (100 MB max), never whole into memory |
 | Quick Settings tile | `ClipboardTileService` → `CaptureActivity` | translucent activity reads on focus |
 | Screenshots | `ScreenshotWorker` | WorkManager content-URI trigger on MediaStore Images, `Screenshots` paths only, newer than enable time; re-arms with `APPEND_OR_REPLACE` (REPLACE cancelled its own run — fixed after emulator test) |
-| Background upload | `UploadWorker` + `ItemCrypto.kt` | Unique, network-constrained, exponential backoff; text only; Tink XChaCha20-Poly1305 + BouncyCastle BLAKE2b, unit-tested against `packages/crypto/vectors/item-v1.json` |
+| Background upload | `UploadWorker` + `ItemCrypto.kt` | Unique, network-constrained, exponential backoff; text in one batch, then images (decoded, thumbnailed and hashed in `Images.kt`) and files up to 10 MB one by one; stands back while the app is on screen; Tink XChaCha20-Poly1305 + BouncyCastle BLAKE2b, unit-tested against `packages/crypto/vectors/item-v1.json` |
 | Copy image to clipboard | `ClipImageProvider` | serves bytes from memory via a pipe — no plaintext image file |
 | Blob transfer | plugin `uploadBlob` / `downloadBlob` | native HTTP, ciphertext only |
-| Text in images (OCR) | `src/services/ocr.ts` + plugin `recognizeText` | Two engines read every image. ML Kit has no Bengali model, so tesseract.js 7 (`ben+eng`, in a web worker) also runs; its text is used when it found a Bengali word with confidence ≥ 80, ML Kit's otherwise. Tesseract's worker, wasm core and language data are bundled (language data as `.bin`: the Android build unpacks `.gz` assets and drops the extension). ML Kit: text recognition through Play services (`play-services-mlkit-text-recognition`, Latin script); the model is requested at install via the `com.google.mlkit.vision.DEPENDENCIES` meta-data (`ocr`). Runs only when the user presses **Copy text** in the image viewer (`ClipLibrary.recognize`). Without Play services only Tesseract runs. |
+| Text in images (OCR) | `src/services/ocr.ts` + plugin `recognizeText` | Two engines read every image. ML Kit reads Latin script only, so tesseract.js 7 (in a web worker) also runs, one pass per language chosen in Settings (Bengali by default; Arabic, Hindi, Japanese), each with English; the pass with the highest page confidence counts, and its text is used when it found a word of that language's script with confidence ≥ 80. All language data is bundled |
 | Backup / Save file | plugin `saveDocument` / `openDocument` | Storage Access Framework pickers: the user chooses the location; no storage permission |
 
 Token sharing: the worker may rotate the refresh token; `AccountController` re-reads the stored session before refreshing so the two never replay each other's token.
@@ -73,7 +73,7 @@ Token sharing: the worker may rotate the refresh token; `AccountController` re-r
 
 ## Known limitations
 
-- Background upload handles text only; images captured while the app is closed upload when it next opens (thumbnails are made in the WebView).
+- Background upload leaves files over 10 MB, photos over 24 megapixels and formats Android cannot decode to the app. `Images.kt` hashes sRGB RGBA like the WebView canvas, but the two decoders may differ by a rounding on images with transparency or an embedded profile; such an image captured on both paths appears twice. Not yet exercised on a device.
 - Background captures classify `url` vs `text` only (code detection runs in the app).
 - Image dedupe hashes RGBA pixels on Android and BGRA on desktop, so the same image captured on both platforms can appear twice.
 - New items from other devices arrive when the app is opened (no push, by design).

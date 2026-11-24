@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import type { KvRepo } from '@clipply/database';
+import { DEFAULT_OCR_LANGUAGES, OcrLanguages } from '@clipply/shared-schemas';
 
 export const Settings = z.object({
   /** Clipboard monitoring on/off (pause/resume). */
   monitoring: z.boolean().default(true),
   captureImages: z.boolean().default(true),
+  /** Keep a copy's bold, links, lists and tables (a rich-text clip) instead of its plain text. */
+  keepFormatting: z.boolean().default(false),
   screenshots: z.boolean().default(true),
   /** null = `$(xdg-user-dir PICTURES)/Screenshots`. */
   screenshotDir: z.string().min(1).max(4096).nullable().default(null),
@@ -18,6 +21,8 @@ export const Settings = z.object({
   linkPreviews: z.boolean().default(true),
   /** Ask GitHub for a newer release on every start, then at most once a day on window focus. */
   checkUpdates: z.boolean().default(true),
+  /** Languages text recognition reads besides English. */
+  ocrLanguages: OcrLanguages.default([...DEFAULT_OCR_LANGUAGES]),
 });
 export type Settings = z.infer<typeof Settings>;
 

@@ -23,7 +23,7 @@ Status: **Phase 3 implemented** (`apps/server`). Express 5 + MongoDB driver 7 + 
 | `GET /sync/pull?cursor&limit` | authorized device | Changes with `seq > cursor`, ≤ 500 per page, `410 cursor_expired` below the purge floor |
 | `POST /sync/push` | authorized device | ≤ 50 ops, one transaction; per-op `applied` / `conflict` / `stale_epoch` / `rejected` |
 | `GET /items/:id` | authorized device | One item (create/edit/pin/favorite/delete are pushes: flags are inside encrypted metadata) |
-| `POST /storage/upload-signature` | authorized device | Signed Cloudinary upload params for a private raw asset (≤ 10 MB) |
+| `POST /storage/upload-signature` | authorized device | Signed Cloudinary upload params for a private raw asset (≤ 10 MB; larger files are uploaded in chunks, each with its own signature) |
 | `POST /storage/confirm` | authorized device | Verifies Cloudinary's response signature, marks the object uploaded |
 | `GET /storage/download-url?itemId` | authorized device | 10-minute signed private download URL, owner-checked |
 | `GET /internal/gc` | `Bearer $CRON_SECRET` | Daily cleanup (Vercel cron) |

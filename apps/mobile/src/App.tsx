@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ClipboardPaste, Clipboard, Images, Laptop, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice } from '@clipply/ui';
+import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice, useDeviceNames } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -77,6 +77,7 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
   const [kinds, setKinds] = useState<ClipKind[]>([]);
   const [open, setOpen] = useState<{ item: ClipView; action: 'scan' | undefined } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const deviceNames = useDeviceNames(rt.account);
   const filter: ListFilter = { ...base, ...(query ? { query } : {}), ...(kinds.length ? { kinds } : {}) };
 
   const saveClipboard = (): void => {
@@ -103,9 +104,9 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
     />
     <div className="space-y-2.5 px-3 pt-2.5 pb-24">
       {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} />}
-      <ClipList filter={filter} onOpen={(item, action) => setOpen({ item, action })} emptyText={empty} layout={grid ? 'grid' : 'list'} pageSize={50} />
+      <ClipList filter={filter} onOpen={(item, action) => setOpen({ item, action })} emptyText={empty} deviceNames={deviceNames} layout={grid ? 'grid' : 'list'} pageSize={50} />
     </div>
-      {open && <ItemViewer item={open.item} action={open.action} onClose={() => setOpen(null)} />}
+      {open && <ItemViewer item={open.item} deviceName={deviceNames[open.item.meta.originDeviceId]} action={open.action} onClose={() => setOpen(null)} />}
       {Object.keys(base).length === 0 && (
         <AddClip
           dial

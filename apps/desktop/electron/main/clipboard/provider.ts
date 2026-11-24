@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MAX_CAPTURE_BYTES, type CaptureInput } from '@clipply/sync-engine';
+import { MAX_FILE_BYTES } from '@clipply/shared-schemas';
+import { classifyText, hasFormatting, type CaptureInput } from '@clipply/sync-engine';
 import type { Logger } from '@clipply/logger';
 
 /** Common shape for every clipboard backend (Electron/X11 now; XFixes or GNOME Shell later). */
@@ -43,7 +44,8 @@ async function bytesOf(v: unknown): Promise<Uint8Array> {
 const MIME: Record<string, string> = {
   '.pdf': 'application/pdf', '.zip': 'application/zip', '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv',
   '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-  '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4',
+  '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
+  '.wav': 'audio/wav', '.flac': 'audio/flac', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mkv': 'video/x-matroska',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -51,34 +53,62 @@ const MIME: Record<string, string> = {
 };
 export const mimeOf = (name: string): string => MIME[extname(name).toLowerCase()] ?? 'application/octet-stream';
 
-/** The local path when a `text/uri-list` names exactly one file:// URI (a file copied in a file manager). */
-export function singleFilePath(uriList: string): string | null {
+/** More files than this in one copy (or more bytes) are somebody moving a folder around, not clips. */
+export const MAX_COPIED_FILES = 20;
+const MAX_COPIED_BYTES = 200 * 1024 * 1024;
+/** HTML larger than this (pages with embedded images) is kept as its plain text. */
+const MAX_HTML_BYTES = 512 * 1024;
+
+/** The local paths when a `text/uri-list` names only file:// URIs (files copied in a file manager); empty otherwise. */
+export function filePaths(uriList: string): string[] {
   const uris = uriList.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-  if (uris.length !== 1 || !uris[0]!.startsWith('file://')) return null;
   try {
-    return fileURLToPath(uris[0]!);
+    return uris.every((u) => u.startsWith('file://')) ? uris.map((u) => fileURLToPath(u)) : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
-async function fileInput(path: string): Promise<CaptureInput | null> {
-  const s = await stat(path);
-  if (!s.isFile() || s.size === 0 || s.size > MAX_CAPTURE_BYTES) return null;
-  const name = basename(path);
-  return { type: 'file', mime: mimeOf(name), data: new Uint8Array(await readFile(path)), name };
+/** A copied file, not read yet. The helper process sends this instead of the contents. */
+export interface FileRef {
+  type: 'file-ref';
+  path: string;
+}
+
+/** The copied files worth keeping: folders, empty and oversize ones are left out. */
+async function fileRefs(paths: readonly string[], log: Logger): Promise<FileRef[]> {
+  if (paths.length > MAX_COPIED_FILES) return [];
+  const refs: FileRef[] = [];
+  let total = 0;
+  for (const path of paths) {
+    const s = await stat(path).catch(() => null);
+    if (!s?.isFile() || s.size === 0 || s.size > MAX_FILE_BYTES || total + s.size > MAX_COPIED_BYTES) continue;
+    total += s.size;
+    refs.push({ type: 'file-ref', path });
+  }
+  if (refs.length > 0 && refs.length < paths.length) log.info('some copied files were skipped', { kept: refs.length, copied: paths.length });
+  return refs;
+}
+
+export async function loadFile(ref: FileRef): Promise<CaptureInput | null> {
+  const s = await stat(ref.path);
+  if (!s.isFile() || s.size === 0 || s.size > MAX_FILE_BYTES) return null;
+  const name = basename(ref.path);
+  return { type: 'file', mime: mimeOf(name), data: new Uint8Array(await readFile(ref.path)), name };
 }
 
 const textOf = async (v: unknown): Promise<string> => (typeof v === 'string' ? v : new TextDecoder().decode(await bytesOf(v)));
 
 type Snapshot =
   | { sig: string; read: null }
-  | { sig: string; read: () => Promise<CaptureInput | null> };
+  | { sig: string; read: () => Promise<Array<CaptureInput | FileRef>> };
 
 export interface ElectronProviderOptions {
   clipboard: ClipboardLike;
   decodeImage: (png: Uint8Array) => DecodedImage | null;
   captureImages: () => boolean;
+  /** Receives copied files unread (the helper process); without it they are read here. */
+  onFileRef?: (ref: FileRef) => void;
   log: Logger;
   intervalMs?: number;
 }
@@ -125,7 +155,8 @@ export class ElectronClipboardProvider implements ClipboardProvider {
 
   async readCurrentClipboard(): Promise<CaptureInput | null> {
     const snap = await this.snapshot();
-    return snap.read ? snap.read() : null;
+    const [first] = snap.read ? await snap.read() : [];
+    return first?.type === 'file-ref' ? loadFile(first) : (first ?? null);
   }
 
   /** One polling step; public for tests. Overlapping ticks are skipped. */
@@ -137,12 +168,30 @@ export class ElectronClipboardProvider implements ClipboardProvider {
       if (snap.sig === this.lastSig) return;
       this.lastSig = snap.sig;
       if (!snap.read) return;
-      const input = await snap.read();
-      if (input) this.callback?.(input);
+      for (const input of await snap.read()) {
+        if (input.type !== 'file-ref') this.callback?.(input);
+        else if (this.opts.onFileRef) this.opts.onFileRef(input);
+        else {
+          const file = await loadFile(input).catch(() => null);
+          if (file) this.callback?.(file);
+        }
+      }
     } catch (error) {
       this.opts.log.warn('clipboard poll failed', { error });
     } finally {
       this.polling = false;
+    }
+  }
+
+  /** The copy with its formatting, when it has any worth keeping; links and code stay plain text clips. */
+  private async formatted(item: Awaited<ReturnType<ClipboardLike['read']>>[number], text: string): Promise<CaptureInput | null> {
+    if (!item.types.includes('text/html') || text.trim() === '' || classifyText(text) !== 'text') return null;
+    try {
+      const html = await textOf(await item.getType('text/html'));
+      return html.length <= MAX_HTML_BYTES && hasFormatting(html) ? { type: 'html', html, text } : null;
+    } catch {
+      // The source went away; its plain text is already here.
+      return null;
     }
   }
 
@@ -164,25 +213,27 @@ export class ElectronClipboardProvider implements ClipboardProvider {
         read: async () => {
           const data = await loadPng();
           const decoded = this.opts.decodeImage(data);
-          if (!decoded) return null;
-          return { type: 'image', mime: 'image/png', data, pixels: decoded.pixels, thumb: decoded.thumb };
+          return decoded ? [{ type: 'image', mime: 'image/png', data, pixels: decoded.pixels, thumb: decoded.thumb }] : [];
         },
       };
     }
-    // One file copied in a file manager: its contents. Several files, folders and oversize files fall back to their paths as text.
+    // Files copied in a file manager: their contents, one clip each. Folders, oversize files or too many files fall back to the paths as text.
     if (has('text/uri-list')) {
       const list = await textOf(await item.getType('text/uri-list'));
-      const path = singleFilePath(list);
-      const file = path ? await fileInput(path).catch(() => null) : null;
-      if (file) return { sig: `file:${sha(list)}`, read: async () => file };
+      const sig = `file:${sha(list)}`;
+      // Still the same copy: nothing on disk is touched again.
+      if (sig === this.lastSig) return { sig, read: null };
+      const refs = await fileRefs(filePaths(list), this.opts.log);
+      if (refs.length > 0) return { sig, read: async () => refs };
     }
     if (has('text/plain')) {
       const text = await textOf(await item.getType('text/plain'));
-      return { sig: `txt:${sha(text)}`, read: async () => ({ type: 'text', text }) };
+      // The HTML is read only for a new copy; change detection stays on the text.
+      return { sig: `txt:${sha(text)}`, read: async () => [(await this.formatted(item, text)) ?? { type: 'text', text }] };
     }
     if (has('text/html')) {
       const html = await textOf(await item.getType('text/html'));
-      return { sig: `html:${sha(html)}`, read: async () => ({ type: 'html', html }) };
+      return { sig: `html:${sha(html)}`, read: async () => [{ type: 'html', html }] };
     }
     return { sig: `other:${item.types.join(',')}`, read: null };
   }

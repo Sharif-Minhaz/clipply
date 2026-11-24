@@ -29,6 +29,7 @@ function fake(initial: Partial<AccountStatus>, devices: DeviceInfo[] = []) {
     acceptEnrollment: vi.fn(async () => set({ vault: 'ready', deviceStatus: 'authorized' })),
     recover: vi.fn(async () => {}),
     devices: async () => devices,
+    deviceNames: async () => ({}),
     startApproval: vi.fn(async () => ({ code: '1111 2222 3333' })),
     approvalCode: vi.fn(async () => ({ code: '4444 5555 6666' })),
     confirmApproval: vi.fn(async () => {}),

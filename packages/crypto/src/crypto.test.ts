@@ -3,12 +3,12 @@ import type { ItemMeta } from '@clipply/shared-schemas';
 
 import { open, pad, seal, unpad } from './aead';
 import { sodium } from './sodium';
-import { fromUtf8, toB64, utf8 } from './encoding';
+import { concat, fromUtf8, toB64, utf8 } from './encoding';
 import {
   CryptoError, contentHash, createKeyring, deriveRecoveryKeys, enrollmentCode, extendsKeyring,
   formatRecoveryKey, generateDek, generateDeviceKeys, generateRecoveryKey, initCrypto, itemAad,
-  openKeyringEnvelope, openMeta, openPart, openRecoveryEnvelope, parseKeyring, parseRecoveryKey,
-  recoveryProofMessage, recoveryPublicKeys, rosterEntry, rotateKeyring, sealKeyringFor, sealMeta, sealPart,
+  openChunk, openKeyringEnvelope, openMeta, openPart, openRecoveryEnvelope, parseKeyring, parseRecoveryKey,
+  recoveryProofMessage, recoveryPublicKeys, rosterEntry, rotateKeyring, sealChunk, sealKeyringFor, sealMeta, sealPart,
   sealRecoveryEnvelope, serializeKeyring, signRecoveryProof, unwrapDek, withRecovery, withRoster, wrapDek,
   matchesFingerprint, pairingFingerprint, pairingProof, pairingSecret, verifyPairingProof,
 } from './index';
@@ -213,6 +213,23 @@ describe('roster and recovery keys inside the keyring', () => {
     const bad = JSON.parse(fromUtf8(serializeKeyring(ring)));
     bad.roster[0].box = 'AAAA';
     expect(() => parseKeyring(utf8(JSON.stringify(bad)))).toThrow(/public key/);
+  });
+});
+
+describe('large bodies', () => {
+  it('binds each chunk to its place and the chunk count', () => {
+    const dek = generateDek();
+    const box = sealChunk(dek, ID_A, 1, 3, utf8('middle'));
+    expect(fromUtf8(openChunk(dek, ID_A, 1, 3, box))).toBe('middle');
+    for (const [i, n] of [[0, 3], [1, 2], [2, 3]] as const) expect(() => openChunk(dek, ID_A, i, n, box)).toThrow(/authentication/);
+    expect(() => openChunk(dek, ID_B, 1, 3, box)).toThrow(/authentication/);
+    expect(() => openPart(dek, ID_A, 'body', box)).toThrow(/authentication/);
+  });
+
+  it('hashes parts like their concatenation, whatever their size', () => {
+    const ring = createKeyring();
+    const big = new Uint8Array((1 << 20) + 5).fill(3);
+    expect(contentHash(ring, utf8('file\0'), big)).toBe(contentHash(ring, concat(utf8('file\0'), big)));
   });
 });
 

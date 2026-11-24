@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { stripTracking, TRANSFORMS } from './transforms';
+import { stripTracking } from '@clipply/sync-engine/links';
+
+import { TRANSFORMS } from './transforms';
 
 const run = (id: string, text: string): string => TRANSFORMS.find((t) => t.id === id)!.apply(text);
 

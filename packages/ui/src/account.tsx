@@ -26,6 +26,8 @@ export interface AccountClient {
   acceptEnrollment(): Promise<void>;
   recover(recoveryKey: string): Promise<void>;
   devices(): Promise<DeviceInfo[]>;
+  /** Names of the other devices by id, remembered on this device (works offline). */
+  deviceNames(): Promise<Record<string, string>>;
   startApproval(deviceId: string): Promise<{ code: string }>;
   /** For an approved device that never accepted its keyring and is joining again. */
   approvalCode(deviceId: string): Promise<{ code: string }>;
@@ -47,6 +49,27 @@ function useAccountStatus(account: AccountClient): AccountStatus | null {
     return account.onStatus(load);
   }, [account]);
   return status;
+}
+
+/** Names for "from <device>" labels; follows renames and devices that join. */
+export function useDeviceNames(account: AccountClient): Record<string, string> {
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    const load = (): void =>
+      void account.deviceNames().then(
+        // Status updates are frequent; the list only redraws when a name changed.
+        (n) => alive && setNames((old) => (JSON.stringify(old) === JSON.stringify(n) ? old : n)),
+        () => undefined,
+      );
+    load();
+    const off = account.onStatus(load);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [account]);
+  return names;
 }
 
 function Card({ children }: { children: ReactNode }) {

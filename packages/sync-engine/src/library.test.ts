@@ -1,12 +1,14 @@
 // @vitest-environment node
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createKeyring, fromUtf8, initCrypto, rotateKeyring, toB64, utf8, type Keyring } from '@clipply/crypto';
-import { EncryptedItem } from '@clipply/shared-schemas';
+import { EncryptedItem, MAX_FILE_BYTES } from '@clipply/shared-schemas';
 import { itemRepo, migrate, outboxRepo, type SqlDb } from '@clipply/database';
 import { openTestDb } from '@clipply/database/testing';
 
-import { classifyText, htmlToText, saveFileName, uuidv7 } from './content';
-import { ClipLibrary, ContentTooLargeError, fitOcr, ItemNotFoundError, MAX_CAPTURE_BYTES, MAX_OCR_BYTES } from './library';
+import { classifyText, saveFileName, uuidv7 } from './content';
+import { htmlToText } from './html';
+import { memoryChunkStore } from './chunks';
+import { ClipLibrary, ContentTooLargeError, fitMetaOcr, fitOcr, ItemNotFoundError, MAX_CAPTURE_BYTES, META_OCR_BYTES } from './library';
 import { exportBackup, importBackup } from './backup';
 
 const DEVICE = '0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
@@ -212,6 +214,29 @@ describe('encrypted backup', () => {
     expect(await other.readThumb(img.id)).toEqual(new Uint8Array([9]));
     expect(img.meta.createdAt).toBe(lib.list({ kinds: ['image'] })[0]!.meta.createdAt);
   });
+
+  it('keeps the recognized text of images, and gives it to a copy that had none', async () => {
+    const text = `${'word '.repeat(2000)}last`;
+    const scanned = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, recognizeText: async () => text });
+    const { id } = (await scanned.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(1, 2, 3) }))!;
+    await scanned.recognize(id);
+    const { data } = await exportBackup(scanned, 'long enough passphrase');
+
+    const otherDb = openTestDb();
+    await migrate(otherDb);
+    const otherRing = createKeyring();
+    const other = new ClipLibrary({ db: otherDb, keyring: () => otherRing, deviceId: DEVICE });
+    await importBackup(other, data, 'long enough passphrase');
+    const [img] = other.list({ query: 'last' });
+    expect(await other.readOcr(img!.id)).toBe(text);
+
+    const bareDb = openTestDb();
+    await migrate(bareDb);
+    const bare = new ClipLibrary({ db: bareDb, keyring: () => otherRing, deviceId: DEVICE });
+    const had = (await bare.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(1, 2, 3) }))!;
+    expect(await importBackup(bare, data, 'long enough passphrase')).toEqual({ imported: 0, duplicates: 1, failed: 0 });
+    expect(await bare.readOcr(had.id)).toBe(text);
+  });
 });
 
 describe('saveFileName', () => {
@@ -261,15 +286,125 @@ describe('text recognition', () => {
 
   it('cuts long text so the sealed meta still fits the wire limit, even with a full title', async () => {
     const long = 'অক্ষর '.repeat(2000);
-    expect(utf8(JSON.stringify(fitOcr(long))).length - 2).toBeLessThanOrEqual(MAX_OCR_BYTES);
+    expect(utf8(JSON.stringify(fitMetaOcr(long))).length - 2).toBeLessThanOrEqual(META_OCR_BYTES);
     const ocr = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, now: () => clock++, recognizeText: async () => long });
     const { id } = (await ocr.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(4) }))!;
     // The caller gets everything to copy; only the stored copy is cut.
     expect(await ocr.recognize(id)).toBe(long.trim());
-    expect(ocr.get(id)?.meta.ocr).toBe(fitOcr(long));
+    expect(ocr.get(id)?.meta.ocr).toBe(fitMetaOcr(long));
+    expect(await ocr.readOcr(id)).toBe(fitOcr(long));
     await ocr.setFlags(id, { title: 'শ'.repeat(200) });
     const row = (await itemRepo(db).get(id))!;
     expect(EncryptedItem.shape.meta.safeParse(toB64(row.meta)).success).toBe(true);
+    expect(EncryptedItem.shape.ocr.safeParse(toB64(row.ocr!)).success).toBe(true);
+  });
+
+  it('searches all recognized text, not only the part in the meta', async () => {
+    const page = `${'lorem ipsum dolor '.repeat(300)}needle at the end`;
+    const ocr = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, now: () => clock++, recognizeText: async () => page });
+    const { id } = (await ocr.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(5) }))!;
+    await ocr.recognize(id);
+    expect(ocr.get(id)?.meta.ocr).not.toContain('needle');
+    expect(ocr.list({ query: 'needle at' }).map((v) => v.id)).toEqual([id]);
+    const fresh = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE });
+    await fresh.load();
+    expect(fresh.list({ query: 'needle at' }).map((v) => v.id)).toEqual([id]);
+    expect((await itemRepo(db).get(id))!.ocr!.toString()).not.toContain('needle');
+  });
+
+  it('still reads text an older app stored in the meta only', async () => {
+    const { id } = (await lib.capture({ type: 'image', mime: 'image/png', data: Uint8Array.of(6) }))!;
+    expect(await lib.readOcr(id)).toBeNull();
+    const old = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, recognizeText: async () => 'old result' });
+    await old.load();
+    await old.recognize(id);
+    await itemRepo(db).put({ ...(await itemRepo(db).get(id))!, ocr: null });
+    expect(await lib.readOcr(id)).toBe('old result');
+  });
+
+  it('joins Japanese characters that the engine spaced out, and nothing else', () => {
+    expect(fitOcr('日 本 語 の テ ス ト OK 2 回')).toBe('日本語のテスト OK 2 回');
+    expect(fitOcr('नमस्ते दुनिया')).toBe('नमस्ते दुनिया');
+  });
+});
+
+describe('large text', () => {
+  const big = `first line\n${'filler text '.repeat(20_000)}\nneedle in the middle\n${'more filler '.repeat(20_000)}`;
+
+  it('has a preview and is searchable, also after a restart', async () => {
+    const { id } = (await lib.capture({ type: 'text', text: big }))!;
+    expect(lib.get(id)!.preview).toMatch(/^first line/);
+    expect(lib.list({ query: 'needle in' }).map((v) => v.id)).toEqual([id]);
+    const fresh = new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE });
+    await fresh.load();
+    await fresh.indexLargeText();
+    expect(fresh.get(id)!.preview).toMatch(/^first line/);
+    expect(fresh.list({ query: 'needle in' }).map((v) => v.id)).toEqual([id]);
+  });
+
+  it('downloads a body that is only on the server, and tries again after being offline', async () => {
+    const { id } = (await lib.capture({ type: 'text', text: big }))!;
+    const row = (await itemRepo(db).get(id))!;
+    await itemRepo(db).put({ ...row, body: null, blobKey: 'k', blobSize: 1 });
+    let online = false;
+    const remote = new ClipLibrary({
+      db, keyring: () => ring, deviceId: DEVICE,
+      fetchBlob: async () => {
+        if (!online) throw new Error('offline');
+        return row.body!;
+      },
+    });
+    await remote.load();
+    await remote.indexLargeText();
+    expect(remote.list({ query: 'needle in' })).toEqual([]);
+    online = true;
+    await remote.indexLargeText();
+    expect(remote.list({ query: 'needle in' }).map((v) => v.id)).toEqual([id]);
+  });
+});
+
+describe('files over one upload', () => {
+  const store = memoryChunkStore();
+  const bytes = (n: number): Uint8Array => Uint8Array.from({ length: n }, (_, i) => (i * 31 + (i >> 8)) & 255);
+  const open = (): ClipLibrary => new ClipLibrary({ db, keyring: () => ring, deviceId: DEVICE, now: () => clock++, chunks: store });
+
+  it('keeps them in encrypted chunks, reads them back, and removes the chunks with the item', async () => {
+    const l = open();
+    const data = bytes(MAX_CAPTURE_BYTES + 5_000_000);
+    const { id } = (await l.capture({ type: 'file', mime: 'video/mp4', name: 'a.mp4', data }))!;
+    const row = (await itemRepo(db).get(id))!;
+    expect(row).toMatchObject({ body: null, chunks: [null, null, null, null] });
+    expect(Buffer.compare(await l.readBody(id), data)).toBe(0);
+    expect(Buffer.from((await store.get(id, 0))!).includes(Buffer.from(data.subarray(0, 64)))).toBe(false);
+    expect(await l.capture({ type: 'file', mime: 'video/mp4', name: 'a.mp4', data })).toEqual({ id, duplicate: true });
+    expect(await store.ids()).toEqual([id]);
+
+    // Swapped chunks do not pass as each other.
+    await store.put(id, 0, (await store.get(id, 1))!);
+    await expect(l.readBody(id)).rejects.toThrow(/authentication/);
+
+    await l.remove([id]);
+    expect(await store.ids()).toEqual([]);
+  });
+
+  it('sweeps chunks without an item on start, and still refuses oversize text and files', async () => {
+    await store.put('orphan', 0, Uint8Array.of(1));
+    const l = open();
+    await l.load();
+    expect(await store.ids()).toEqual([]);
+    await expect(l.capture({ type: 'text', text: 'x'.repeat(MAX_CAPTURE_BYTES + 1) })).rejects.toThrow(ContentTooLargeError);
+    await expect(l.capture({ type: 'file', mime: 'x/y', name: 'a', data: new Uint8Array(MAX_FILE_BYTES + 1) })).rejects.toThrow(ContentTooLargeError);
+  });
+});
+
+describe('similar texts', () => {
+  it('puts the clip to keep first: a favorite, else the newest', async () => {
+    const a = await lib.capture({ type: 'text', text: 'Buy milk, eggs' });
+    const b = await lib.capture({ type: 'text', text: 'buy milk eggs' });
+    await lib.capture({ type: 'text', text: 'unrelated words' });
+    expect((await lib.similarTexts()).map((g) => g.map((v) => v.id))).toEqual([[b!.id, a!.id]]);
+    await lib.setFlags(a!.id, { favorite: true });
+    expect((await lib.similarTexts())[0]!.map((v) => v.id)).toEqual([a!.id, b!.id]);
   });
 });
 

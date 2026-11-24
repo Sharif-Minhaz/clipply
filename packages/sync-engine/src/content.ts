@@ -47,21 +47,6 @@ export function classifyText(text: string): Extract<ClipKind, 'text' | 'url' | '
   return 'text';
 }
 
-/** Plain-text view of HTML for previews and search. Not a sanitizer; never render its output as HTML. */
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 /** RFC 9562 UUIDv7: time-ordered ids so item ids sort by creation. */
 export function uuidv7(now: number = Date.now()): string {
   const b = crypto.getRandomValues(new Uint8Array(16));

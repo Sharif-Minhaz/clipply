@@ -7,8 +7,8 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /**
- * The subset of @clipply/crypto the background upload needs: encrypt one new text item in format
- * encVersion 1 (docs/encryption.md §4). Pure JVM so it is unit-tested against
+ * The subset of @clipply/crypto the background upload needs: encrypt one new text, image or file item in
+ * format encVersion 1 (docs/encryption.md §4). Pure JVM so it is unit-tested against
  * packages/crypto/vectors/item-v1.json. It never handles key exchange or rotation.
  */
 class ItemCrypto(keyringJson: String) {
@@ -25,9 +25,9 @@ class ItemCrypto(keyringJson: String) {
     }
 
     /** Keyed BLAKE2b-256 with the hash subkey derived from epoch 1 (stable across rotations). */
-    fun keyedHash(data: ByteArray): String {
+    fun keyedHash(vararg parts: ByteArray): String {
         val d = Blake2bDigest(kdf(keys.getValue(1), 1, "clphash_"), 32, null, null)
-        d.update(data, 0, data.size)
+        for (p in parts) d.update(p, 0, p.size)
         val out = ByteArray(32)
         d.doFinal(out, 0)
         return out.joinToString("") { "%02x".format(it) }
@@ -59,7 +59,42 @@ class ItemCrypto(keyringJson: String) {
             .put("body", bodyB64)
     }
 
+    /** A new image or file: `item` still needs its `blob` reference, and `body` is the ciphertext to upload. */
+    class BlobItem(val id: String, val item: JSONObject, val body: ByteArray)
+
+    /**
+     * `hashSource`: an image's decoded RGBA pixels, a file's bytes (library.ts `prepare`). Images always travel
+     * as a blob with their thumbnail inline. null when the body would not fit one blob.
+     */
+    fun encryptBlob(
+        kind: String, mime: String, data: ByteArray, hashSource: ByteArray, thumb: ByteArray?, name: String?, deviceId: String, now: Long, random: SecureRandom = SecureRandom(),
+    ): BlobItem? {
+        require(kind == "image" || kind == "file")
+        if (data.isEmpty() || data.size > MAX_CONTENT_BYTES) return null
+        val id = uuidv7(now, random)
+        val dek = ByteArray(32).also { random.nextBytes(it) }
+        val meta = JSONObject()
+            .put("kind", kind).put("mime", mime.take(255)).put("createdAt", now).put("originDeviceId", deviceId).put("size", data.size)
+            .put("contentHash", keyedHash("$kind\u0000".toByteArray(Charsets.UTF_8), hashSource))
+            .put("favorite", false).put("pinned", false)
+        if (kind == "file") meta.put("file", JSONObject().put("name", (name ?: "file").take(255)))
+        val metaB64 = b64url(seal(dek, pad(meta.toString().toByteArray(Charsets.UTF_8)), aad(id, "meta")))
+        if (metaB64.length > META_MAX) return null
+        val item = JSONObject()
+            .put("id", id).put("encVersion", 1).put("keyEpoch", current)
+            .put("dek", b64url(seal(keys.getValue(current), dek, aad(id, "dek"))))
+            .put("meta", metaB64)
+        if (thumb != null) {
+            val t = b64url(seal(dek, pad(thumb), aad(id, "thumb")))
+            if (t.length <= INLINE_BODY_MAX) item.put("thumb", t)
+        }
+        return BlobItem(id, item, seal(dek, pad(data), aad(id, "body")))
+    }
+
     companion object {
+        /** MAX_CONTENT_BYTES in packages/shared-schemas: what fits one 10 MB upload once padded and sealed. */
+        const val MAX_CONTENT_BYTES = 10 * 1024 * 1024 - 65_536 - 64
+        const val META_MAX = 4096
         const val INLINE_BODY_MAX = 65_536
 
         fun aad(itemId: String, part: String) = "clipply/v1/$itemId/$part".toByteArray(Charsets.UTF_8)

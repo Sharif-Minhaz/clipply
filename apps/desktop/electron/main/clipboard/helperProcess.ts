@@ -6,7 +6,7 @@ import type { CaptureInput } from '@clipply/sync-engine';
 
 import { fileSink } from '../logFile';
 import { decodeWire, encodeWire } from './helper';
-import { ElectronClipboardProvider } from './provider';
+import { ElectronClipboardProvider, type FileRef } from './provider';
 
 /**
  * Child side of HelperClipboardProvider: a windowless Electron on XWayland that polls the clipboard
@@ -15,13 +15,15 @@ import { ElectronClipboardProvider } from './provider';
 export async function runClipboardHelper(): Promise<void> {
   await app.whenReady();
   const log = createLogger('clipboard-helper', { sink: fileSink(join(app.getPath('userData'), 'logs', 'clipboard-helper.log')) });
-  const send = (m: { t: string; id?: number; input?: CaptureInput | null }): void => void process.stdout.write(`${encodeWire(m)}\n`);
+  const send = (m: { t: string; id?: number; input?: CaptureInput | FileRef | null }): void => void process.stdout.write(`${encodeWire(m)}\n`);
   // Images go out as PNG; the main process decodes them (pixels would be far larger on the wire).
   const strip = (i: CaptureInput | null): CaptureInput | null => (i?.type === 'image' ? { type: 'image', mime: i.mime, data: i.data } : i);
   const provider = new ElectronClipboardProvider({
     clipboard,
     decodeImage: () => ({ pixels: new Uint8Array(0), thumb: new Uint8Array(0) }),
     captureImages: () => true,
+    // The main process reads them itself; base64 of 100 MB has no business on a pipe.
+    onFileRef: (ref) => send({ t: 'capture', input: ref }),
     log,
   });
   provider.onClipboardChanged((input) => send({ t: 'capture', input: strip(input) }));

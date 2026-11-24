@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
-import { ConfirmUploadRequest, UploadSignatureRequest, type DownloadUrlResponse, type UploadSignatureResponse } from '@clipply/shared-schemas';
+import { ConfirmUploadRequest, MAX_CHUNKS, UploadSignatureRequest, type DownloadUrlResponse, type UploadSignatureResponse } from '@clipply/shared-schemas';
 
 import type { Store } from '../../db';
 import { HttpError, parse } from '../../errors';
@@ -38,8 +38,10 @@ export function storageRoutes(store: Store, cfg: CloudinaryConfig, now: () => nu
   r.get('/download-url', async (req, res) => {
     const { userId } = requireAuth(req);
     const itemId = parse(z.uuid(), req.query.itemId);
+    const chunk = parse(z.coerce.number().int().min(0).max(MAX_CHUNKS).optional(), req.query.chunk);
     const doc = await store.c.items.findOne({ _id: `${userId}:${itemId}` });
-    const key = doc && !doc.deleted ? doc.item?.blob?.key : undefined;
+    const item = doc && !doc.deleted ? doc.item : null;
+    const key = chunk === undefined ? item?.blob?.key : item?.chunks?.[chunk]?.key;
     if (!key) throw new HttpError(404, 'blob_not_found');
     const out: DownloadUrlResponse = privateDownloadUrl(cfg, key, Math.floor(now() / 1000));
     res.json(out);

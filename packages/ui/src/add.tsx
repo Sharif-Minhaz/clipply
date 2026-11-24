@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { FilePlus, ImagePlus, NotebookPen, Plus, X, type LucideProps } from 'lucide-react';
-import { MAX_CONTENT_BYTES } from '@clipply/shared-schemas';
+import { MAX_FILE_BYTES } from '@clipply/shared-schemas';
 import type { ManualInput } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
-import { formatBytes } from './viewer';
+import { formatBytes } from './time';
 
 type PickKind = 'image' | 'file';
 
@@ -20,7 +20,7 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message.replac
 
 /**
  * Floating + button: add a note, an image or a file by hand. Added items are encrypted and synced like
- * copied ones; files and images up to the single-upload limit (~10 MB) reach the other devices.
+ * copied ones; files and images up to MAX_FILE_BYTES (large ones in chunks) reach the other devices.
  * `className` positions the wrapper (default: fixed to the bottom-right corner).
  * `dial` shows the choices as a Material-style speed dial (phones); `actions` adds choices nearest the button.
  */
@@ -68,7 +68,7 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
     const file = list?.[0];
     if (!file) return;
     if (file.size === 0) return say('That file is empty.', true);
-    if (file.size > MAX_CONTENT_BYTES) return say(`Too large: ${formatBytes(file.size)}. The limit is ${formatBytes(MAX_CONTENT_BYTES)}.`, true);
+    if (file.size > MAX_FILE_BYTES) return say(`Too large: ${formatBytes(file.size)}. The limit is ${formatBytes(MAX_FILE_BYTES)}.`, true);
     const mime = file.type || 'application/octet-stream';
     // Something that is not an image, picked from the image picker, is kept as a file.
     const type = kind === 'image' && mime.startsWith('image/') ? 'image' : 'file';

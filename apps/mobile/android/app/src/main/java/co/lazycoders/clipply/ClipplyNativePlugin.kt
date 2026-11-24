@@ -29,11 +29,9 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.UUID
 
 @CapacitorPlugin(
     name = "ClipplyNative",
@@ -79,7 +77,7 @@ class ClipplyNativePlugin : Plugin() {
     fun readClipboard(call: PluginCall) = guard(call) {
         val out = JSObject()
         when (val clip = readClip(context)) {
-            Clip.None, Clip.TooLarge, is Clip.FileData -> out.put("type", "none")
+            Clip.None, Clip.TooLarge, Clip.Stored, is Clip.FileData -> out.put("type", "none")
             Clip.Sensitive -> out.put("type", "sensitive")
             is Clip.Text -> out.put("type", "text").put("text", clip.text).put("timestamp", clipTimestamp())
             is Clip.Image -> out.put("type", "image").put("mime", clip.mime).put("data", Base64.encodeToString(clip.bytes, Base64.NO_WRAP)).put("timestamp", clipTimestamp())
@@ -93,7 +91,10 @@ class ClipplyNativePlugin : Plugin() {
 
     @PluginMethod
     fun writeClipboardText(call: PluginCall) = guard(call) {
-        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Clipply", call.getString("text")!!))
+        val text = call.getString("text")!!
+        val html = call.getString("html")
+        val clip = if (html == null) ClipData.newPlainText("Clipply", text) else ClipData.newHtmlText("Clipply", text, html)
+        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
         call.resolve()
     }
 
@@ -110,11 +111,61 @@ class ClipplyNativePlugin : Plugin() {
     @PluginMethod
     fun drainInbox(call: PluginCall) = guard(call) {
         val arr = JSArray()
-        for ((file, e) in Inbox.list(context)) {
-            arr.put(JSObject.fromJSONObject(e))
-            file.delete()
+        for (file in Inbox.files(context)) {
+            // Skips what the upload worker is sending; it reports back when it is done.
+            if (!Inbox.claim(file)) continue
+            try {
+                val e = Inbox.read(context, file) ?: continue
+                arr.put(JSObject.fromJSONObject(e))
+                // Large entries stay until the app has read their parts (inboxDone).
+                if (!e.has("parts")) Inbox.delete(context, file)
+            } finally {
+                Inbox.release(file)
+            }
         }
         call.resolve(JSObject().put("entries", arr))
+    }
+
+    @PluginMethod
+    fun inboxPart(call: PluginCall) = guard(call) {
+        val data = Inbox.part(context, call.getString("id")!!, call.getInt("index")!!)
+        call.resolve(JSObject().put("data", data?.let { Base64.encodeToString(it, Base64.NO_WRAP) } ?: JSONObject.NULL))
+    }
+
+    @PluginMethod
+    fun inboxDone(call: PluginCall) = guard(call) {
+        Inbox.done(context, call.getString("id")!!)
+        call.resolve()
+    }
+
+    // ── chunks of large files ───────────────────────────────────────────────────────────────
+
+    @PluginMethod
+    fun chunkPut(call: PluginCall) = guard(call) {
+        ChunkFiles.put(context, call.getString("id")!!, call.getInt("index")!!, Base64.decode(call.getString("data")!!, Base64.NO_WRAP))
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun chunkGet(call: PluginCall) = guard(call) {
+        val data = ChunkFiles.get(context, call.getString("id")!!, call.getInt("index")!!)
+        call.resolve(JSObject().put("data", data?.let { Base64.encodeToString(it, Base64.NO_WRAP) } ?: JSONObject.NULL))
+    }
+
+    @PluginMethod
+    fun chunkHas(call: PluginCall) = guard(call) {
+        call.resolve(JSObject().put("has", ChunkFiles.has(context, call.getString("id")!!, call.getInt("index")!!)))
+    }
+
+    @PluginMethod
+    fun chunkRemove(call: PluginCall) = guard(call) {
+        ChunkFiles.remove(context, call.getString("id")!!)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun chunkIds(call: PluginCall) = guard(call) {
+        call.resolve(JSObject().put("ids", JSArray(ChunkFiles.ids(context))))
     }
 
     @PluginMethod
@@ -157,29 +208,8 @@ class ClipplyNativePlugin : Plugin() {
 
     @PluginMethod
     fun uploadBlob(call: PluginCall) = guard(call) {
-        val boundary = "clipply-${UUID.randomUUID()}"
-        val body = ByteArrayOutputStream()
-        val fields = call.getObject("fields")!!
-        for (k in fields.keys()) {
-            body.write("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n${fields.getString(k)}\r\n".toByteArray())
-        }
-        body.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"clip\"\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray())
-        body.write(Base64.decode(call.getString("data")!!, Base64.NO_WRAP))
-        body.write("\r\n--$boundary--\r\n".toByteArray())
-        val c = URL(call.getString("url")!!).openConnection() as HttpURLConnection
-        c.requestMethod = "POST"
-        c.doOutput = true
-        c.connectTimeout = 15_000
-        c.readTimeout = 120_000
-        c.setRequestProperty("content-type", "multipart/form-data; boundary=$boundary")
-        c.outputStream.use { it.write(body.toByteArray()) }
-        if (c.responseCode !in 200..299) {
-            // Cloudinary explains rejections in {"error":{"message":…}}; it never contains clip content.
-            val body = c.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            val reason = runCatching { org.json.JSONObject(body).getJSONObject("error").getString("message") }.getOrDefault(body.take(300))
-            throw java.io.IOException("blob upload failed (${c.responseCode}): $reason")
-        }
-        call.resolve(JSObject().put("json", c.inputStream.bufferedReader().use { it.readText() }))
+        val data = Base64.decode(call.getString("data")!!, Base64.NO_WRAP)
+        call.resolve(JSObject().put("json", Http.upload(call.getString("url")!!, call.getObject("fields")!!, data)))
     }
 
     @PluginMethod
@@ -229,6 +259,38 @@ class ClipplyNativePlugin : Plugin() {
         if (result.resultCode != Activity.RESULT_OK || uri == null) return@guard call.resolve(JSObject().put("saved", false))
         context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(Base64.decode(call.getString("data")!!, Base64.NO_WRAP)) }
         call.resolve(JSObject().put("saved", true))
+    }
+
+    /** Documents being written piece by piece; kept open, because not every provider can append to a file. */
+    private val documents = java.util.concurrent.ConcurrentHashMap<String, java.io.OutputStream>()
+
+    /** Like saveDocument, for large files: appendDocument adds each piece, closeDocument finishes. */
+    @PluginMethod
+    fun createDocument(call: PluginCall) {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, call.getString("name") ?: "file")
+        startActivityForResult(call, intent, "createdDocument")
+    }
+
+    @ActivityCallback
+    private fun createdDocument(call: PluginCall, result: ActivityResult) = guard(call) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) return@guard call.resolve(JSObject().put("handle", JSONObject.NULL))
+        val handle = java.util.UUID.randomUUID().toString()
+        documents[handle] = context.contentResolver.openOutputStream(uri, "wt")!!
+        call.resolve(JSObject().put("handle", handle))
+    }
+
+    @PluginMethod
+    fun appendDocument(call: PluginCall) = guard(call) {
+        documents.getValue(call.getString("handle")!!).write(Base64.decode(call.getString("data")!!, Base64.NO_WRAP))
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun closeDocument(call: PluginCall) = guard(call) {
+        documents.remove(call.getString("handle")!!)?.close()
+        call.resolve()
     }
 
     @PluginMethod

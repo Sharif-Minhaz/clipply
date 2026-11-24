@@ -30,10 +30,14 @@ function placeholder(id: string, input: ManualInput, now: number): ClipView {
   return { id, meta, preview: isText ? input.text.trim().slice(0, 500) : input.name, hasThumb: input.type === 'image' };
 }
 
+function matchesFlags(v: ClipView, f: ListFilter): boolean {
+  if (f.pinned !== undefined && v.meta.pinned !== f.pinned) return false;
+  return f.favorite === undefined || (v.meta.favorite || v.meta.pinned) === f.favorite;
+}
+
 function matches(v: ClipView, f: ListFilter): boolean {
   if (f.kinds && !f.kinds.includes(v.meta.kind)) return false;
-  if (f.pinned !== undefined && v.meta.pinned !== f.pinned) return false;
-  if (f.favorite !== undefined && (v.meta.favorite || v.meta.pinned) !== f.favorite) return false;
+  if (!matchesFlags(v, f)) return false;
   const q = f.query?.trim().toLowerCase();
   return !q || v.preview.toLowerCase().includes(q) || !!v.meta.title?.toLowerCase().includes(q);
 }
@@ -66,6 +70,8 @@ export function optimistic(inner: ClipplyClient): ClipplyClient {
     copy: (id) => inner.copy(id),
     copyText: (text) => inner.copyText(text),
     recognizeText: (id) => inner.recognizeText(id),
+    imageText: (id) => inner.imageText(id),
+    similarTexts: () => inner.similarTexts(),
     saveFile: (id) => inner.saveFile(id),
     editText: (id, text) => inner.editText(id, text),
     storage: () => inner.storage(),
@@ -84,7 +90,8 @@ export function optimistic(inner: ClipplyClient): ClipplyClient {
       // Overrides apply to the page the platform returns: deletes and flag changes that leave the filter
       // drop out, pending adds lead the first page. The next real list (after the call settles) is exact.
       const real = await inner.list(filter);
-      const shown = real.items.filter((v) => !hidden.has(v.id)).map(overlay).filter((v) => matches(v, filter));
+      // The platform's own matches stand (it searches full text, this layer only sees previews).
+      const shown = real.items.filter((v) => !hidden.has(v.id)).map(overlay).filter((v) => !flags.has(v.id) || matchesFlags(v, filter));
       const pending = (filter.offset ?? 0) === 0 ? [...adds.values()].map((a) => a.view).filter((v) => matches(v, filter)).reverse() : [];
       return { items: [...pending, ...shown], total: Math.max(0, real.total - (real.items.length - shown.length) + pending.length) };
     },

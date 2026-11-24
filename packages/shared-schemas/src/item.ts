@@ -29,15 +29,26 @@ export const ItemMeta = z.object({
   favorite: z.boolean(),
   pinned: z.boolean(),
   file: z.object({ name: z.string().max(255) }).optional(),
-  /** Text recognized in an image on the capturing device ('' = none found), trimmed to fit the meta budget. */
+  /** Start of the text recognized in an image ('' = none found), trimmed to fit the meta budget; all of it is `EncryptedItem.ocr`. */
   ocr: z.string().max(1500).optional(),
 });
 export type ItemMeta = z.infer<typeof ItemMeta>;
 
 /** Cloudinary free plan rejects raw uploads above 10 MB. */
 export const MAX_BLOB_BYTES = 10 * 1024 * 1024;
-/** Largest plaintext body whose padded ciphertext still fits one Cloudinary raw upload. */
+/** Largest plaintext body whose padded ciphertext still fits one Cloudinary raw upload. Larger images and files are split into chunks. */
 export const MAX_CONTENT_BYTES = MAX_BLOB_BYTES - 65_536 - 64;
+/** Plaintext bytes per chunk of a large image or file. */
+export const CHUNK_BYTES = 4 * 1024 * 1024;
+/** Largest image or file Clipply keeps. */
+export const MAX_FILE_BYTES = 100 * 1024 * 1024;
+export const MAX_CHUNKS = Math.ceil(MAX_FILE_BYTES / CHUNK_BYTES);
+/** Encrypted recognized text (base64url chars); see sync-engine's MAX_OCR_BYTES. */
+export const OCR_MAX = 40_000;
+
+/** Optional server abilities, announced in SyncHead so a client never sends what an older server would drop. */
+export const SERVER_FEATURES = ['chunks', 'ocr'] as const;
+export type ServerFeature = (typeof SERVER_FEATURES)[number];
 
 /** Encrypted body stored as a private Cloudinary raw asset instead of inline. */
 export const BlobRef = z.object({
@@ -46,6 +57,7 @@ export const BlobRef = z.object({
   /** Ciphertext byte size. */
   size: z.number().int().positive().max(MAX_BLOB_BYTES),
 });
+export type BlobRef = z.infer<typeof BlobRef>;
 
 /** What a client uploads. Every binary field is `nonce || ciphertext+tag`. */
 export const EncryptedItem = z
@@ -60,8 +72,15 @@ export const EncryptedItem = z
     body: B64.max(INLINE_BODY_MAX).optional(),
     /** Remote body for large content (images, files). */
     blob: BlobRef.optional(),
+    /**
+     * Every chunk of a body too large for one blob, in order. `blob` repeats the first one, so apps from
+     * before chunks still accept the item (they cannot open its body).
+     */
+    chunks: z.array(BlobRef).min(2).max(MAX_CHUNKS).optional(),
     /** Encrypted thumbnail made on the capturing device; the storage host never sees an image. */
     thumb: B64.max(INLINE_BODY_MAX).optional(),
+    /** All text recognized in an image, encrypted like the body. */
+    ocr: B64.max(OCR_MAX).optional(),
   })
   .refine((i) => (i.body === undefined) !== (i.blob === undefined), {
     message: 'exactly one of body or blob is required',
@@ -69,6 +88,9 @@ export const EncryptedItem = z
   // Keeps one op at most ~one inline payload, so MAX_PUSH_OPS still fits Vercel's body limit.
   .refine((i) => i.thumb === undefined || i.blob !== undefined, {
     message: 'thumb is only allowed with blob',
+  })
+  .refine((i) => i.chunks === undefined || (i.blob !== undefined && i.chunks[0]?.key === i.blob.key && new Set(i.chunks.map((c) => c.key)).size === i.chunks.length), {
+    message: 'chunks must start with blob and be distinct',
   });
 export type EncryptedItem = z.infer<typeof EncryptedItem>;
 

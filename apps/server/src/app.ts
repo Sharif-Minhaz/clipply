@@ -57,7 +57,7 @@ export function createApp(d: AppDeps): Express {
     }
     next();
   });
-  // Pushes are capped by MAX_PUSH_OPS × inline caps (~3.5 MB); Vercel rejects bodies over 4.5 MB.
+  // Clients keep a push near MAX_SYNC_BYTES (3 MB); Vercel rejects bodies over 4.5 MB.
   app.use(express.json({ limit: '4mb' }));
 
   const v1 = Router();
@@ -75,7 +75,7 @@ export function createApp(d: AppDeps): Express {
   authed.use('/vault', rateLimit(store, 'vault', 60, 60, now), vaultRoutes(store, now));
   authed.use('/sync', requireAuthorizedDevice, syncRoutes(store, now, destroyBlob));
   authed.use('/items', requireAuthorizedDevice, clipboardRoutes(store));
-  authed.use('/storage', requireAuthorizedDevice, rateLimit(store, 'storage', 120, 60, now), storageRoutes(store, cloudinary, now));
+  authed.use('/storage', requireAuthorizedDevice, rateLimit(store, 'storage', 300, 60, now), storageRoutes(store, cloudinary, now));
 
   // Vercel Cron calls this with `Authorization: Bearer $CRON_SECRET`.
   v1.get('/internal/gc', async (req, res) => {

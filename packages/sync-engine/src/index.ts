@@ -1,4 +1,6 @@
+export * from './chunks';
 export * from './content';
+export * from './html';
 export * from './library';
 export * from './vault';
 export * from './sync';
@@ -6,3 +8,4 @@ export * from './account';
 export * from './backup';
 export * from './preview';
 export * from './update';
+export * from './ocr';

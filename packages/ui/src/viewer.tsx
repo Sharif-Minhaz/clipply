@@ -4,14 +4,10 @@ import type { ClipView } from '@clipply/sync-engine';
 
 import { useClipply } from './client';
 import { IconButton, KIND_ICON, KIND_LABEL } from './components';
-import { formatRelative } from './time';
+import { formatBytes, formatRelative } from './time';
+import { AUTO_PREVIEW_BYTES, FilePreview, PreviewGate, previewKind } from './filePreview';
+import { RichText } from './richText';
 import { TRANSFORMS, type TextTransform } from './transforms';
-
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
 
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
@@ -30,8 +26,12 @@ export function ItemViewer({ item, onClose, deviceName, action }: { item: ClipVi
   const closeRef = useRef<HTMLButtonElement>(null);
   const KindIcon = KIND_ICON[meta.kind];
   const now = Date.now();
+  // A file is downloaded whole to preview it: large ones, and types with nothing to show, wait until asked.
+  const isFile = meta.kind === 'file';
+  const [load, setLoad] = useState(!isFile || meta.size <= AUTO_PREVIEW_BYTES);
 
   useEffect(() => {
+    if (!load) return;
     let alive = true;
     client.readBody(item.id).then(
       (b) => alive && setBody(b),
@@ -40,7 +40,7 @@ export function ItemViewer({ item, onClose, deviceName, action }: { item: ClipVi
     return () => {
       alive = false;
     };
-  }, [client, item.id]);
+  }, [client, item.id, load]);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -74,6 +74,14 @@ export function ItemViewer({ item, onClose, deviceName, action }: { item: ClipVi
     ...(meta.kind === 'file' || meta.kind === 'image' ? [{ icon: Download, label: 'Save', name: 'Save', onClick: () => void client.saveFile(item.id) }] : []),
   ];
 
+  const fileCard = (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+      <span aria-hidden className="flex size-20 items-center justify-center rounded-3xl bg-(--kind)/12 text-(--kind)"><KindIcon className="size-10" /></span>
+      <p className="max-w-full font-semibold break-words text-ink">{meta.file?.name ?? 'File'}</p>
+      <p className="text-sm text-muted">{formatBytes(meta.size)}</p>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex bg-black/70 sm:items-center sm:justify-center sm:p-6" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
@@ -92,25 +100,23 @@ export function ItemViewer({ item, onClose, deviceName, action }: { item: ClipVi
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-base font-semibold text-ink">{meta.title ?? (meta.kind === 'file' ? meta.file?.name : null) ?? KIND_LABEL[meta.kind]}</p>
-            <p className="truncate text-xs text-muted">{details.join(' · ')}</p>
+            <p className="line-clamp-2 text-xs break-words text-muted">{details.join(' · ')}</p>
           </div>
           <IconButton icon={Trash} label="Delete" danger onClick={() => void remove()} />
         </header>
         <div className="flex min-h-0 flex-1 flex-col">
           {error ? (
             <p role="alert" className="p-6 text-sm text-danger">Could not open item: {error}</p>
+          ) : !load ? (
+            previewKind(meta.mime, meta.file?.name ?? '') ? <PreviewGate size={meta.size} onOpen={() => setLoad(true)}>{fileCard}</PreviewGate> : fileCard
           ) : !body ? (
             <div aria-busy="true" className="m-4 h-40 animate-pulse rounded-xl bg-raised" />
           ) : meta.kind === 'image' ? (
             <ImageView id={item.id} bytes={body} mime={meta.mime} alt={meta.title ?? 'Clipboard image'} initialText={meta.ocr} scanNow={action === 'scan'} />
-          ) : meta.kind === 'file' ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-              <span aria-hidden className="flex size-20 items-center justify-center rounded-3xl bg-(--kind)/12 text-(--kind)"><KindIcon className="size-10" /></span>
-              <p className="max-w-full font-semibold break-words text-ink">{meta.file?.name ?? 'File'}</p>
-              <p className="text-sm text-muted">{formatBytes(meta.size)}</p>
-            </div>
+          ) : isFile ? (
+            <FilePreview item={item} bytes={body} fallback={fileCard} />
           ) : (
-            <TextPane id={item.id} text={new TextDecoder().decode(body)} mono={meta.kind === 'code' || meta.kind === 'html'} onSaved={onClose} />
+            <TextPane id={item.id} text={new TextDecoder().decode(body)} mono={meta.kind === 'code' || meta.kind === 'html'} rich={meta.kind === 'html'} onSaved={onClose} />
           )}
         </div>
         <footer className="flex gap-2 border-t border-line p-3">
@@ -199,10 +205,14 @@ function ImagePane({ bytes, mime, alt, scanning }: { bytes: Uint8Array; mime: st
   );
 }
 
-/** `onSaved` runs after a successful save (the viewer closes); a failed save keeps the editor open with the error. */
-function TextPane({ id, text, mono, onSaved }: { id: string; text: string; mono: boolean; onSaved: () => void }) {
+/**
+ * `onSaved` runs after a successful save (the viewer closes); a failed save keeps the editor open with the error.
+ * `rich`: HTML, shown formatted with its source one tap away; editing works on the source.
+ */
+function TextPane({ id, text, mono, rich, onSaved }: { id: string; text: string; mono: boolean; rich: boolean; onSaved: () => void }) {
   const client = useClipply();
   const [editing, setEditing] = useState(false);
+  const [source, setSource] = useState(!rich);
   const [draft, setDraft] = useState(text);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -248,6 +258,15 @@ function TextPane({ id, text, mono, onSaved }: { id: string; text: string; mono:
             <Pencil aria-hidden className="size-4" /> Edit
           </button>
         )}
+        {rich && !editing && (
+          <div role="group" aria-label="View" className="flex rounded-full ring-1 ring-line">
+            {[false, true].map((s) => (
+              <button key={String(s)} type="button" aria-pressed={source === s} onClick={() => setSource(s)} className={`rounded-full px-3 py-1.5 ${source === s ? 'bg-raised font-semibold text-ink' : 'hover:text-ink'}`}>
+                {s ? 'Source' : 'Formatted'}
+              </button>
+            ))}
+          </div>
+        )}
         <label className="flex min-w-0 items-center gap-1.5 rounded-full py-1 pr-1 pl-3 ring-1 ring-line focus-within:ring-2 focus-within:ring-accent hover:text-ink">
           <WandSparkles aria-hidden className="size-4 shrink-0" />
           <select
@@ -268,6 +287,7 @@ function TextPane({ id, text, mono, onSaved }: { id: string; text: string; mono:
       {editing ? (
         <textarea
           aria-label="Edit text"
+          dir="auto"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -278,8 +298,10 @@ function TextPane({ id, text, mono, onSaved }: { id: string; text: string; mono:
           }}
           className={`min-h-0 flex-1 resize-none bg-surface p-4 text-base text-ink focus:outline-none ${mono ? 'font-mono text-sm' : ''}`}
         />
+      ) : !source ? (
+        <RichText html={text} />
       ) : (
-        <pre className={`min-h-0 flex-1 overflow-auto p-4 break-words whitespace-pre-wrap text-ink ${mono ? 'font-mono text-sm leading-relaxed' : 'font-sans text-base leading-relaxed'}`}>{text}</pre>
+        <pre dir="auto" className={`min-h-0 flex-1 overflow-auto p-4 break-words whitespace-pre-wrap text-ink ${mono ? 'font-mono text-sm leading-relaxed' : 'font-sans text-base leading-relaxed'}`}>{text}</pre>
       )}
     </div>
   );
@@ -299,6 +321,25 @@ function ImageView({ id, bytes, mime, alt, initialText, scanNow }: { id: string;
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // The item carries the start of its text; the rest is read when the image opens.
+  useEffect(() => {
+    if (!initialText) return;
+    let alive = true;
+    client.imageText(id).then(
+      (full) => {
+        if (!alive || !full) return;
+        setText((t) => (t === initialText ? full : t));
+        setDraft((d) => (d === initialText ? full : d));
+      },
+      () => {
+        // The start is still shown.
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [client, id, initialText]);
 
   const copyText = async (rescan = false): Promise<void> => {
     setError(null);
@@ -358,6 +399,7 @@ function ImageView({ id, bytes, mime, alt, initialText, scanNow }: { id: string;
         {open && (
           <textarea
             aria-label="Recognized text"
+            dir="auto"
             value={draft}
             rows={6}
             spellCheck={false}

@@ -108,8 +108,8 @@ export function createApiClient(options: ApiClientOptions) {
 
   return {
     syncHead: () => request('GET', '/v1/sync/head', SyncHead),
-    pull: (cursor: number, limit = 200) =>
-      request('GET', `/v1/sync/pull?cursor=${encodeURIComponent(cursor)}&limit=${encodeURIComponent(limit)}`, PullResponse),
+    pull: (cursor: number, limit = 200, resync = false) =>
+      request('GET', `/v1/sync/pull?cursor=${encodeURIComponent(cursor)}&limit=${encodeURIComponent(limit)}${resync ? '&resync=1' : ''}`, PullResponse),
     push: (body: PushRequest) => request('POST', '/v1/sync/push', PushResponse, body),
     getItem: (id: string) => request('GET', `/v1/items/${encodeURIComponent(id)}`, ServerItem),
 
@@ -134,7 +134,9 @@ export function createApiClient(options: ApiClientOptions) {
 
     uploadSignature: (body: UploadSignatureRequest) => request('POST', '/v1/storage/upload-signature', UploadSignatureResponse, body),
     confirmUpload: (body: ConfirmUploadRequest) => request('POST', '/v1/storage/confirm', NoContent, body),
-    downloadUrl: (itemId: string) => request('GET', `/v1/storage/download-url?itemId=${encodeURIComponent(itemId)}`, DownloadUrlResponse),
+    /** `chunk`: which part of a large body; the whole body otherwise. */
+    downloadUrl: (itemId: string, chunk?: number) =>
+      request('GET', `/v1/storage/download-url?itemId=${encodeURIComponent(itemId)}${chunk === undefined ? '' : `&chunk=${chunk}`}`, DownloadUrlResponse),
   };
 }
 

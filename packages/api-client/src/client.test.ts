@@ -24,7 +24,7 @@ function setup(responses: Array<Response | Error>, opts: { token?: string | null
 describe('api client', () => {
   it('sends the bearer token and validates the response', async () => {
     const { client, fetch } = setup([json(200, { seq: 4, keyEpoch: 1 })]);
-    expect(await client.syncHead()).toEqual({ seq: 4, keyEpoch: 1 });
+    expect(await client.syncHead()).toEqual({ seq: 4, keyEpoch: 1, features: [] });
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://api.test/v1/sync/head');
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok');
@@ -47,7 +47,7 @@ describe('api client', () => {
   it('refreshes once on 401 and retries', async () => {
     const refresh = vi.fn(async () => true);
     const { client, fetch } = setup([json(401, { error: 'expired' }), json(200, { seq: 1, keyEpoch: 1 })], { refresh });
-    expect(await client.syncHead()).toEqual({ seq: 1, keyEpoch: 1 });
+    expect(await client.syncHead()).toEqual({ seq: 1, keyEpoch: 1, features: [] });
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
