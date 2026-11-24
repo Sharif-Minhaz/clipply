@@ -32,6 +32,7 @@ export function createApp(d: AppDeps): Express {
   const cloudinary: CloudinaryConfig = {
     cloudName: config.CLOUDINARY_CLOUD_NAME, apiKey: config.CLOUDINARY_API_KEY, apiSecret: config.CLOUDINARY_API_SECRET,
   };
+  const destroyBlob = (key: string): Promise<boolean> => destroy(cloudinary, key, Math.floor(now() / 1000), d.fetch);
 
   const app = express();
   app.disable('x-powered-by');
@@ -72,14 +73,14 @@ export function createApp(d: AppDeps): Express {
   authed.use(rateLimit(store, 'api', 600, 60, now));
   authed.use('/devices', deviceRoutes(store, now));
   authed.use('/vault', rateLimit(store, 'vault', 60, 60, now), vaultRoutes(store, now));
-  authed.use('/sync', requireAuthorizedDevice, syncRoutes(store, now));
+  authed.use('/sync', requireAuthorizedDevice, syncRoutes(store, now, destroyBlob));
   authed.use('/items', requireAuthorizedDevice, clipboardRoutes(store));
   authed.use('/storage', requireAuthorizedDevice, rateLimit(store, 'storage', 120, 60, now), storageRoutes(store, cloudinary, now));
 
   // Vercel Cron calls this with `Authorization: Bearer $CRON_SECRET`.
   v1.get('/internal/gc', async (req, res) => {
     if (req.headers.authorization !== `Bearer ${config.CRON_SECRET}`) throw new HttpError(401, 'unauthenticated');
-    const result = await runGc(store, (key) => destroy(cloudinary, key, Math.floor(now() / 1000), d.fetch), now(), d.log.child('gc'));
+    const result = await runGc(store, destroyBlob, now(), d.log.child('gc'));
     res.json(result);
   });
 

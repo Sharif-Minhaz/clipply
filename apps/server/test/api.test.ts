@@ -183,16 +183,16 @@ describe('storage + maintenance', () => {
     expect(url.searchParams.get('signature')).toBe(signParams({ public_id: key, timestamp: url.searchParams.get('timestamp')!, type: 'private', expires_at: url.searchParams.get('expires_at')! }, 'cloud-secret'));
     expect((await request(h.app).get(`/v1/storage/download-url?itemId=${base.id}`).set(...bearer(other))).status).toBe(404);
 
+    // Deleting the item destroys its blob right away, not at the next cron.
+    h.fetchCalls.length = 0;
     await push(d, [{ type: 'delete', opId: randomUUID(), itemId: base.id }]);
-    expect((await h.store.c.objects.findOne({ _id: key }))?.status).toBe('delete_pending');
+    expect(h.fetchCalls.filter((u) => u.endsWith('/raw/destroy'))).toHaveLength(1);
+    expect(await h.store.c.objects.findOne({ _id: key })).toBeNull();
 
     expect((await request(h.app).get('/v1/internal/gc')).status).toBe(401);
     h.clock.now += 31 * 86_400_000;
     const gc = await request(h.app).get('/v1/internal/gc').set('authorization', `Bearer ${'c'.repeat(20)}`);
-    expect(gc.body.blobsDestroyed).toBeGreaterThanOrEqual(1);
     expect(gc.body.tombstonesPurged).toBeGreaterThanOrEqual(1);
-    expect(h.fetchCalls.some((u) => u.endsWith('/raw/destroy'))).toBe(true);
-    expect(await h.store.c.objects.findOne({ _id: key })).toBeNull();
     const refreshed = await request(h.app).post('/v1/auth/refresh').send({ refreshToken: d.refresh });
     const auth = ['authorization', `Bearer ${refreshed.body.accessToken}`] as const;
     expect((await request(h.app).get('/v1/sync/pull?cursor=1').set(...auth)).body).toEqual({ error: 'cursor_expired' });

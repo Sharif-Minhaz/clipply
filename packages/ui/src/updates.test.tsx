@@ -24,14 +24,14 @@ afterEach(cleanup);
 
 describe('UpdateNotice', () => {
   it('renders nothing while up to date', async () => {
-    const { container } = render(<UpdateNotice client={client(upToDate)} variant="sidebar" />);
+    const { container } = render(<UpdateNotice client={client(upToDate)} />);
     await new Promise((r) => setTimeout(r, 0));
     expect(container.textContent).toBe('');
   });
 
   it('opens the release page when a newer version is known', async () => {
     const c = client(newer);
-    render(<UpdateNotice client={c} variant="banner" />);
+    render(<UpdateNotice client={c} />);
     await userEvent.click(await screen.findByRole('button', { name: /0\.2\.0 is available/ }));
     expect(c.openReleasePage).toHaveBeenCalled();
   });
@@ -39,11 +39,11 @@ describe('UpdateNotice', () => {
   it('installs where the app can update itself, and retries after a failure', async () => {
     const install = vi.fn(async () => Promise.reject(new Error("Error invoking remote method 'update:install': Error: Allow Clipply to install apps.")));
     const c = { ...client(newer), install };
-    render(<UpdateNotice client={c} variant="banner" />);
+    render(<UpdateNotice client={c} />);
     const button = await screen.findByRole('button', { name: /0\.2\.0 is available/ });
-    expect(button.textContent).toContain('Tap to update.');
+    expect(button.textContent).toContain('Download and install it now.');
     await userEvent.click(button);
-    expect((await screen.findByRole('status')).textContent).toBe('Allow Clipply to install apps. Tap to try again.');
+    expect((await screen.findByRole('status')).textContent).toBe('Allow Clipply to install apps. Try again.');
     await userEvent.click(button);
     expect(install).toHaveBeenCalledTimes(2);
     expect(c.openReleasePage).not.toHaveBeenCalled();
@@ -54,7 +54,7 @@ describe('UpdateNotice', () => {
       report = onProgress!;
       return new Promise<void>(() => {});
     });
-    render(<UpdateNotice client={{ ...client(newer), install }} variant="banner" />);
+    render(<UpdateNotice client={{ ...client(newer), install }} />);
     await userEvent.click(await screen.findByRole('button', { name: /0\.2\.0 is available/ }));
     expect(screen.getByRole('status').textContent).toBe('Downloading…');
     act(() => report(41.6));

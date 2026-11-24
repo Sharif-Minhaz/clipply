@@ -132,7 +132,7 @@ export function UpdatePanel({ client, autoCheck, onAutoCheck }: { client: Update
       </div>
       <SwitchRow
         label="Check for updates automatically"
-        hint="At most once a day, when Clipply opens. Sends one anonymous request to GitHub (it sees your IP address); nothing about you or your clips."
+        hint="Every time Clipply starts, and at most once a day while it stays open. Sends one anonymous request to GitHub (it sees your IP address); nothing about you or your clips."
         checked={autoCheck}
         onChange={onAutoCheck}
       />
@@ -140,30 +140,12 @@ export function UpdatePanel({ client, autoCheck, onAutoCheck }: { client: Update
   );
 }
 
-/** Shown only when a newer version is known: a sidebar item (desktop) or a banner (Android). */
-export function UpdateNotice({ client, variant }: { client: UpdateClient; variant: 'sidebar' | 'banner' }) {
+/** Banner shown only when a newer version is known (desktop and Android). */
+export function UpdateNotice({ client }: { client: UpdateClient }) {
   const [state] = useUpdateState(client);
   const install = useInstall(client);
   if (!state?.available) return null;
-  const selfUpdate = !!client.install;
-  const hint = install.busy ? install.label : install.error ? `${install.error} Tap to try again.` : selfUpdate ? 'Tap to update.' : 'Tap to open the download page.';
-  if (variant === 'sidebar') {
-    return (
-      <button
-        type="button"
-        onClick={install.run}
-        disabled={install.busy}
-        title={install.error ?? (selfUpdate ? `Download and install Clipply ${state.latest}` : `Open the Clipply ${state.latest} release page`)}
-        className="flex w-full items-center gap-2.5 rounded-lg bg-clip/15 px-3 py-2 text-left text-xs font-semibold text-frame-ink hover:bg-clip/25"
-      >
-        <Download aria-hidden className={`size-4 shrink-0 text-clip ${install.busy ? 'animate-pulse' : ''}`} />
-        <span className="flex-1">
-          {install.busy ? install.label : `Update available: ${state.latest}`}
-          {install.busy && install.percent !== null && <ProgressBar percent={install.percent} />}
-        </span>
-      </button>
-    );
-  }
+  const hint = install.busy ? install.label : install.error ? `${install.error} Try again.` : client.install ? 'Download and install it now.' : 'Open the download page.';
   return (
     <button
       type="button"

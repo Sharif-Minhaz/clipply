@@ -102,7 +102,7 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
       {...(base.kinds ? { kindOptions: base.kinds } : {})}
     />
     <div className="space-y-2.5 px-3 pt-2.5 pb-24">
-      {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} variant="banner" />}
+      {Object.keys(base).length === 0 && <UpdateNotice client={rt.updates} />}
       <ClipList filter={filter} onOpen={setOpen} emptyText={empty} layout={grid ? 'grid' : 'list'} />
     </div>
       {open && <ItemViewer item={open} onClose={() => setOpen(null)} />}

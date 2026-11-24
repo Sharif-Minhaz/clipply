@@ -49,9 +49,10 @@ export function ItemViewer({ item, onClose, deviceName }: { item: ClipView; onCl
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const remove = async (): Promise<void> => {
-    await client.remove([item.id]);
+  const remove = (): void => {
+    // Optimistic: the list hides the item now and brings it back if the delete fails.
     onClose();
+    void client.remove([item.id]);
   };
   const copy = async (): Promise<void> => {
     await client.copy(item.id);

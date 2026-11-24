@@ -67,7 +67,6 @@ export function App() {
           </button>
         ))}
         <div className="mt-auto space-y-1">
-          <UpdateNotice client={window.clipply.updates} variant="sidebar" />
           {status && (
             <button
               type="button"
@@ -83,6 +82,7 @@ export function App() {
         </div>
       </nav>
       <main className="min-w-0 flex-1 overflow-y-auto">
+        <div className="px-6 pt-4 empty:hidden"><UpdateNotice client={window.clipply.updates} /></div>
         {tab !== 'devices' && (
           <div className="px-6 pt-4 empty:hidden"><JoinRequestBanner account={window.clipply.account} onReview={() => setTab('devices')} /></div>
         )}

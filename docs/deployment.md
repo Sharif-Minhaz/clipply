@@ -41,7 +41,7 @@ npx vercel deploy --prebuilt --prod
 - [ ] Sign in from the desktop app; device appears as authorized.
 - [ ] Copy an image; confirm a `raw` asset of type `private` appears in Cloudinary, and that its content is not a viewable image.
 - [ ] Open the image on a second device (exercises `/storage/download-url`).
-- [ ] Delete it; after the daily cron (or calling `/v1/internal/gc` with the cron secret) it disappears from Cloudinary.
+- [ ] Delete it; it disappears from Cloudinary as soon as the delete syncs (a failed destroy is retried by the daily cron, or by calling `/v1/internal/gc` with the cron secret).
 - [ ] Vercel → Settings → Cron Jobs lists `/v1/internal/gc`.
 
 ## Cost notes

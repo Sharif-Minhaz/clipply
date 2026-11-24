@@ -284,6 +284,16 @@ describe('shared UI', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it('viewer closes at once on Delete, before the platform finishes', async () => {
+    const user = userEvent.setup();
+    const remove = vi.fn(() => new Promise<void>(() => {}));
+    const onClose = vi.fn();
+    render(<ClipplyProvider client={{ ...lib.client(), remove }}><ItemViewer item={lib.list()[0]!} onClose={onClose} /></ClipplyProvider>);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith(['b']);
+  });
+
   it('shows Copying… while a copy is still downloading', async () => {
     const user = userEvent.setup();
     let finish!: () => void;

@@ -66,7 +66,7 @@ export const MobileSettings = z.object({
   retentionDays: z.number().int().min(0).max(3650).default(30),
   /** Fetch Open Graph images for links (the site sees this device's IP). */
   linkPreviews: z.boolean().default(true),
-  /** Ask GitHub for a newer release at most once a day, when the app opens. */
+  /** Ask GitHub for a newer release on every cold start, then at most once a day on resume. */
   checkUpdates: z.boolean().default(true),
 });
 
@@ -220,7 +220,7 @@ export async function boot(): Promise<Runtime> {
   // On a cold start the window gained focus before this listener existed, so read once now.
   captureOnFocus();
   await ClipplyNative.addListener('inbox', () => void drainInbox());
-  // Check-only: one anonymous GET to GitHub (native HTTP, like link previews), at most daily, when the app opens.
+  // Check-only: one anonymous GET to GitHub (native HTTP, like link previews), on every cold start, then at most daily on resume.
   const updateListeners = new Set<() => void>();
   const updateChecker = new UpdateChecker({
     currentVersion: appVersion,
@@ -238,9 +238,9 @@ export async function boot(): Promise<Runtime> {
     },
     store: { get: () => kv.get('update.check'), set: (v) => kv.set('update.check', v) },
   });
-  const autoCheckUpdates = (): void => {
+  const autoCheckUpdates = (force = false): void => {
     if (!settings.checkUpdates) return;
-    updateChecker.check().then(
+    updateChecker.check({ force }).then(
       () => updateListeners.forEach((l) => l()),
       (error: unknown) => log.debug('update check failed', { error }),
     );
@@ -264,7 +264,7 @@ export async function boot(): Promise<Runtime> {
       return () => updateListeners.delete(cb);
     },
   };
-  autoCheckUpdates();
+  autoCheckUpdates(true);
 
   await CapApp.addListener('resume', () => {
     void drainInbox().then(() => account.sync());

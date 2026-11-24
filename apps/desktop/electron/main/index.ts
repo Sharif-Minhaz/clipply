@@ -234,7 +234,7 @@ async function main(): Promise<void> {
     deviceId: vaultState.status === 'ready' ? vaultState.vault.deviceId : null,
   });
 
-  // Update check: one anonymous GET to GitHub, at most daily, on start and window focus (never polled).
+  // Update check: one anonymous GET to GitHub on every start, then at most daily on window focus (never polled).
   const updateKv = kvRepo(db);
   const updates = new UpdateChecker({
     currentVersion: app.getVersion(),
@@ -245,9 +245,9 @@ async function main(): Promise<void> {
     },
     store: { get: () => updateKv.get('update.check'), set: (v) => updateKv.set('update.check', v) },
   });
-  const autoCheckUpdates = (): void => {
+  const autoCheckUpdates = (force = false): void => {
     if (!(core?.settings.checkUpdates ?? true)) return;
-    updates.check().then(
+    updates.check({ force }).then(
       (s) => {
         if (s.available) log.info('update available', { latest: s.latest });
         send(CH.updateChanged);
@@ -350,7 +350,7 @@ async function main(): Promise<void> {
     send(CH.statusChanged);
     autoCheckUpdates();
   });
-  autoCheckUpdates();
+  autoCheckUpdates(true);
 
   // X11 key grab: works on X11 sessions; on GNOME Wayland the GNOME custom shortcut is used instead.
   try {
