@@ -235,6 +235,7 @@ async function main(): Promise<void> {
     screenshotDir,
     screenshotWatching: screenshotWatch !== null,
     items: library?.list().length ?? 0,
+    activity: library?.hourlyCounts() ?? [],
     corrupt: library?.corruptCount ?? 0,
     gnomeShortcut: await gnomeShortcutInstalled(),
     globalShortcut: globalShortcutActive,

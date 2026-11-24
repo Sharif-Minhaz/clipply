@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ClipboardPaste, Clipboard, Images, Laptop, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice, useDeviceNames } from '@clipply/ui';
+import { AddClip, ClipList, ClipplyProvider, DevicesPanel, ItemViewer, JoinRequestBanner, MEDIA_KINDS, PageBackdrop, SearchStrip, SyncButton, UpdateNotice, useDeviceNames } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -40,8 +40,10 @@ function Centered({ children }: { children: ReactNode }) {
 function Shell({ rt }: { rt: Runtime }) {
   const [tab, setTab] = useState<Tab>('clipboard');
   return (
-    <div className="flex h-dvh flex-col bg-surface pt-[env(safe-area-inset-top)] text-ink">
-      <main className="min-h-0 flex-1 overflow-y-auto">
+    <div className="relative isolate h-dvh bg-surface pt-[env(safe-area-inset-top)] text-ink">
+      <PageBackdrop />
+      {/* The list runs under the floating bar; the padding keeps its end reachable. */}
+      <main className="h-full overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+5.75rem)]">
         {tab !== 'devices' && (
           <div className="px-4 pt-4 empty:hidden"><JoinRequestBanner account={rt.account} onReview={() => setTab('devices')} /></div>
         )}
@@ -51,7 +53,8 @@ function Shell({ rt }: { rt: Runtime }) {
         {tab === 'devices' && <div className="space-y-6 px-4 pt-6 pb-10"><h1 className="px-1 text-[1.75rem] leading-tight font-bold tracking-tight text-ink">Devices</h1><DevicesPanel account={rt.account} /></div>}
         {tab === 'settings' && <SettingsScreen rt={rt} />}
       </main>
-      <nav aria-label="Main" className="mx-3 mb-[calc(env(safe-area-inset-bottom)+0.5rem)] grid grid-cols-5 rounded-3xl bg-raised p-1.5 text-muted shadow-[0_10px_30px_-10px_rgb(8_50_60/0.35)] ring-1 ring-line/60">
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[calc(env(safe-area-inset-bottom)+6.5rem)] bg-linear-to-t from-surface from-25% to-transparent" />
+      <nav aria-label="Main" className="absolute inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] z-10 grid grid-cols-5 rounded-3xl bg-raised p-1.5 text-muted shadow-float ring-1 ring-line/60">
         {TABS.map(({ tab: t, label, icon: Icon }) => (
           <button
             key={t}
@@ -60,7 +63,7 @@ function Shell({ rt }: { rt: Runtime }) {
             onClick={() => setTab(t)}
             className={`flex flex-col items-center gap-1 rounded-2xl py-1.5 text-xs ${tab === t ? 'font-semibold text-accent' : ''}`}
           >
-            <span aria-hidden className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${tab === t ? 'bg-accent/12' : ''}`}>
+            <span aria-hidden className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${tab === t ? 'bg-brand text-white shadow-[0_6px_14px_-6px_var(--color-clip)]' : ''}`}>
               <Icon className="size-5.5" />
             </span>
             {label}
@@ -95,7 +98,7 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
           <img src={logo} alt="" className="size-9 rounded-xl shadow-[0_6px_14px_-6px_rgb(0_0_0/0.6)]" />
           <div>
             <h1 className="text-lg leading-tight font-bold tracking-tight">Clipply</h1>
-            <p className="text-[0.6875rem] leading-tight text-white/80">{hint}</p>
+            <p className="text-xs leading-none text-white/80">{hint}</p>
           </div>
         </div>
       }

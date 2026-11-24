@@ -34,6 +34,16 @@
   --text-xs--line-height: 1.4;
   --text-sm: 0.9375rem;
   --text-sm--line-height: 1.5;
+  /* Lift: slips on the page, the same under the pointer, and things that float above both. */
+  --shadow-card: 0 1px 2px rgb(8 50 60 / 0.05), 0 12px 28px -16px rgb(8 50 60 / 0.3);
+  --shadow-card-hover: 0 1px 2px rgb(8 50 60 / 0.06), 0 18px 36px -16px rgb(8 50 60 / 0.42);
+  --shadow-float: 0 16px 40px -12px rgb(8 50 60 / 0.4);
+
+  /* Menus grow out of the button that opened them. */
+  --animate-pop: pop 140ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  }
   /* The OCR scan band in the image viewer. */
   --animate-scan: scan 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   @keyframes scan {
@@ -55,18 +65,58 @@
   --color-kind-file: #475569;
 }
 
-/* Ink-to-teal with a glow in the corner: the phone header, the desktop sidebar and the + button. White text stays >= 4.5:1. */
+/* Ink-to-teal with a glow in the corner: the phone header. White text stays >= 4.5:1. */
 @utility bg-hero {
   background:
     radial-gradient(90% 70% at 100% 0%, color-mix(in srgb, var(--color-clip) 40%, transparent), transparent 70%),
     linear-gradient(160deg, var(--color-frame) 0%, var(--color-strip) 100%);
 }
 
-/* The desktop search header: a light teal wash that fades into the page. Opaque, because it sticks over the list. */
-@utility bg-tint {
+/* The desktop sidebar: ink at the top where the labels are, teal light pooling behind the contour lines. */
+@utility bg-side {
   background:
-    radial-gradient(50% 120% at 85% 0%, color-mix(in srgb, var(--color-clip) 18%, transparent), transparent 70%),
-    linear-gradient(180deg, color-mix(in srgb, var(--color-clip) 9%, var(--color-surface)), var(--color-surface));
+    radial-gradient(120% 42% at 100% 66%, color-mix(in srgb, var(--color-clip) 34%, transparent), transparent 72%),
+    radial-gradient(90% 30% at 100% 0%, color-mix(in srgb, var(--color-clip) 20%, transparent), transparent 75%),
+    linear-gradient(180deg, var(--color-frame) 0%, color-mix(in srgb, var(--color-strip) 55%, var(--color-frame)) 100%);
+}
+
+/* The teal of whatever is current or primary (active page, + button). White on it stays >= 4.5:1. */
+@utility bg-brand {
+  background: linear-gradient(135deg, var(--color-strip-hover) 0%, var(--color-strip) 55%, color-mix(in srgb, var(--color-strip) 72%, var(--color-frame)) 100%);
+}
+
+/* The page itself: paper with teal light falling in from the top right (see PageBackdrop). */
+@utility bg-page {
+  background:
+    radial-gradient(60% 45% at 92% 0%, color-mix(in srgb, var(--color-clip) 17%, transparent), transparent 72%),
+    radial-gradient(45% 45% at 0% 100%, color-mix(in srgb, var(--color-clip) 12%, transparent), transparent 72%),
+    var(--color-surface);
+}
+
+/*
+ * Behind a floating header: blurs clips scrolling under it and fades out below. It appears with the first
+ * few pixels of scroll (scroll-driven where supported), so at rest the page shows through untouched.
+ */
+@utility veil {
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  backdrop-filter: blur(16px);
+  mask-image: linear-gradient(black 72%, transparent);
+  @supports (animation-timeline: scroll()) {
+    /* Stays hidden on a page too short to scroll, where the timeline is inactive. */
+    opacity: 0;
+    animation: veil linear both;
+    animation-timeline: scroll(nearest);
+    animation-range: 0 3rem;
+  }
+}
+
+@keyframes veil {
+  to { opacity: 1; }
+}
+
+/* A clip kind's hue pulled toward the ink, for text that sits on a tint of the same hue. Needs `--kind`. */
+@utility text-kind-strong {
+  color: color-mix(in srgb, var(--kind) 78%, var(--color-ink));
 }
 
 @layer base {
@@ -88,6 +138,9 @@
     --color-kind-html: #b79cff;
     --color-kind-image: #fb923c;
     --color-kind-file: #a3b4c6;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 28px -16px rgb(0 0 0 / 0.6);
+    --shadow-card-hover: 0 1px 2px rgb(0 0 0 / 0.3), 0 18px 36px -16px rgb(0 0 0 / 0.8);
+    --shadow-float: 0 16px 40px -12px rgb(0 0 0 / 0.8);
     color-scheme: dark;
   }
 
@@ -110,6 +163,9 @@
       --color-kind-html: #b79cff;
       --color-kind-image: #fb923c;
       --color-kind-file: #a3b4c6;
+      --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 28px -16px rgb(0 0 0 / 0.6);
+      --shadow-card-hover: 0 1px 2px rgb(0 0 0 / 0.3), 0 18px 36px -16px rgb(0 0 0 / 0.8);
+      --shadow-float: 0 16px 40px -12px rgb(0 0 0 / 0.8);
       color-scheme: dark;
     }
   }

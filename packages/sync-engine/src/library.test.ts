@@ -182,6 +182,17 @@ describe('ClipLibrary', () => {
     expect(await lib.capture({ type: 'text', text: 'joins the account' })).toMatchObject({ id, duplicate: true });
   });
 
+  it('counts clips per hour, oldest first, leaving out older ones', async () => {
+    const HOUR = 3_600_000;
+    for (const [text, at] of [['too old', 0], ['first', 2.5 * HOUR], ['second', 2.6 * HOUR], ['latest', 4.9 * HOUR]] as const) {
+      clock = at;
+      await lib.capture({ type: 'text', text });
+    }
+    clock = 5 * HOUR;
+    expect(lib.hourlyCounts(3)).toEqual([2, 0, 1]);
+    expect(lib.hourlyCounts(24).reduce((a, b) => a + b)).toBe(4);
+  });
+
   it('notifies subscribers and exposes the hash for self-write detection', async () => {
     let calls = 0;
     const off = lib.subscribe(() => calls++);

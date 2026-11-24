@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import logo from './logo.png';
 import { Clipboard, Images, Laptop, Pause, Play, Settings as SettingsIcon, Star } from 'lucide-react';
-import { AddClip, AppVersion, ClipList, ItemViewer, JoinRequestBanner, MEDIA_KINDS, SearchStrip, SyncButton, UpdateNotice, useDeviceNames } from '@clipply/ui';
+import { AddClip, AppVersion, ClipList, ContourLines, ItemViewer, JoinRequestBanner, MEDIA_KINDS, PageBackdrop, SearchStrip, Sparkline, SyncButton, UpdateNotice, useDeviceNames } from '@clipply/ui';
 import type { ClipKind } from '@clipply/shared-schemas';
 import type { ClipView, ListFilter } from '@clipply/sync-engine';
 
@@ -43,7 +43,8 @@ export function App() {
 
   return (
     <div className="flex h-screen bg-surface text-ink">
-      <nav aria-label="Main" className="flex w-60 shrink-0 flex-col gap-1 bg-hero px-4 py-5 text-frame-ink">
+      <nav aria-label="Main" className="relative isolate flex w-60 shrink-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden bg-side px-4 py-5 text-frame-ink">
+        <ContourLines className="absolute bottom-28 left-0 -z-10 h-48 w-full text-clip opacity-70" />
         <div className="mb-6 flex items-center gap-3 px-1">
           <img src={logo} alt="" className="size-11 rounded-2xl shadow-[0_8px_20px_-8px_rgb(0_0_0/0.6)]" />
           <div className="leading-tight">
@@ -58,12 +59,12 @@ export function App() {
             aria-current={tab === t ? 'page' : undefined}
             onClick={() => setTab(t)}
             className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[0.9375rem] transition-colors ${
-              tab === t ? 'bg-white/14 font-semibold text-white shadow-[0_6px_16px_-8px_rgb(0_0_0/0.5)] ring-1 ring-white/15' : 'text-frame-muted hover:bg-white/8 hover:text-frame-ink'
+              tab === t ? 'bg-brand font-semibold text-white shadow-[0_8px_24px_-10px_var(--color-clip)] ring-1 ring-clip/60' : 'text-frame-muted hover:bg-white/8 hover:text-frame-ink'
             }`}
           >
-            <Icon aria-hidden className={`size-4.5 ${tab === t ? 'text-clip' : ''}`} />
+            <Icon aria-hidden className="size-4.5" />
             {label}
-            {t === 'clipboard' && status && <span className="ml-auto rounded-full bg-white/12 px-2 py-0.5 text-xs font-medium text-frame-ink tabular-nums">{status.items}</span>}
+            {t === 'clipboard' && status && <span className={`ml-auto rounded-full px-2 py-0.5 text-xs tabular-nums ${tab === t ? 'bg-clip font-semibold text-frame' : 'bg-white/12 font-medium text-frame-ink'}`}>{status.items}</span>}
           </button>
         ))}
         <div className="mt-auto space-y-1">
@@ -72,16 +73,22 @@ export function App() {
               type="button"
               onClick={() => void window.clipply.updateSettings({ monitoring: !status.monitoring }).then(refresh)}
               title={status.monitoring ? 'Pause watching the clipboard' : 'Resume watching the clipboard'}
-              className="flex w-full items-center gap-2.5 rounded-2xl bg-white/6 px-3.5 py-3 text-left text-xs text-frame-ink ring-1 ring-white/12 hover:bg-white/10"
+              className="block w-full space-y-2.5 rounded-2xl bg-frame/45 px-3.5 py-3 text-left text-xs text-frame-ink ring-1 ring-white/15 transition-colors hover:bg-frame/25"
             >
-              <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${status.monitoring ? 'bg-clip shadow-[0_0_10px_var(--color-clip)]' : 'bg-frame-muted'}`} />
-              <span className="flex-1">{status.monitoring ? 'Watching the clipboard' : 'Paused'}</span>
-              {status.monitoring ? <Pause aria-hidden className="size-4" /> : <Play aria-hidden className="size-4" />}
+              <span className="flex items-center gap-2.5">
+                <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${status.monitoring ? 'bg-clip shadow-[0_0_10px_var(--color-clip)]' : 'bg-frame-muted'}`} />
+                <span className="flex-1 whitespace-nowrap">{status.monitoring ? 'Watching the clipboard' : 'Paused'}</span>
+                {status.monitoring ? <Pause aria-hidden className="size-4" /> : <Play aria-hidden className="size-4" />}
+              </span>
+              <Sparkline values={status.activity} className={`h-7 w-full ${status.monitoring ? 'text-clip' : 'text-frame-muted'}`} />
+              <span className="block text-frame-muted tabular-nums">{status.activity.reduce((a, b) => a + b, 0)} in the last 24 hours</span>
             </button>
           )}
         </div>
       </nav>
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <div className="relative isolate min-w-0 flex-1">
+      <PageBackdrop />
+      <main className="h-full overflow-y-auto">
         <div className="px-6 pt-4 empty:hidden"><UpdateNotice client={window.clipply.updates} /></div>
         {tab !== 'devices' && (
           <div className="px-6 pt-4 empty:hidden"><JoinRequestBanner account={window.clipply.account} onReview={() => setTab('devices')} /></div>
@@ -92,6 +99,7 @@ export function App() {
         {tab === 'devices' && <DevicesScreen />}
         {tab === 'settings' && <SettingsScreen status={status} onChanged={refresh} />}
       </main>
+      </div>
     </div>
   );
 }

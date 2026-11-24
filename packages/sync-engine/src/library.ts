@@ -281,6 +281,17 @@ export class ClipLibrary {
     for (const id of ids) await this.deps.chunks?.remove(id).catch(() => undefined);
   }
 
+  /** Clips per hour over the last `hours`, oldest first (the desktop activity line). */
+  hourlyCounts(hours = 24): number[] {
+    const out = new Array<number>(hours).fill(0);
+    const now = this.now();
+    for (const { meta } of this.index.values()) {
+      const ago = Math.floor((now - meta.createdAt) / 3_600_000);
+      if (ago >= 0 && ago < hours) out[hours - 1 - ago]! += 1;
+    }
+    return out;
+  }
+
   get corruptCount(): number {
     return this.corrupt.size;
   }

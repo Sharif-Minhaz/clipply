@@ -9,7 +9,7 @@ export function SettingsSection({ title, description, children }: { title: strin
   return (
     <section className="space-y-2">
       <h2 className="px-1 text-[0.9375rem] font-bold text-ink">{title}</h2>
-      <div className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-raised *:px-4 *:py-3.5 sm:*:px-5">{children}</div>
+      <div className="divide-y divide-line overflow-hidden rounded-2xl bg-raised shadow-card ring-1 ring-line/60 *:px-4 *:py-3.5 sm:*:px-5">{children}</div>
       {description && <p className="px-1 text-xs leading-relaxed text-muted">{description}</p>}
     </section>
   );
@@ -52,7 +52,7 @@ export const selectClass =
 
 /** Buttons used across settings and account screens. */
 export const buttonClass = {
-  plain: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-lg whitespace-nowrap border border-line bg-raised px-3.5 py-2 text-sm font-semibold text-ink transition-colors hover:border-muted/60 hover:bg-surface disabled:opacity-50',
-  primary: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-lg whitespace-nowrap bg-accent px-3.5 py-2 text-sm font-semibold text-raised transition-opacity hover:opacity-90 disabled:opacity-50',
-  danger: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-lg whitespace-nowrap border border-danger/40 px-3.5 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10 disabled:opacity-50',
+  plain: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-xl whitespace-nowrap border border-line bg-raised px-3.5 py-2 text-sm font-semibold text-ink transition-colors hover:border-muted/60 hover:bg-surface disabled:opacity-50',
+  primary: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-xl whitespace-nowrap bg-accent px-3.5 py-2 text-sm font-semibold text-raised transition-opacity hover:opacity-90 disabled:opacity-50',
+  danger: 'inline-flex shrink-0 items-center justify-center gap-2 rounded-xl whitespace-nowrap border border-danger/40 px-3.5 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10 disabled:opacity-50',
 };

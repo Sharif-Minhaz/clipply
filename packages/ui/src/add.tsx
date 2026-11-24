@@ -96,11 +96,11 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
             <>
               <div aria-hidden className={`fixed inset-0 ${dial ? 'bg-black/40' : ''}`} onMouseDown={() => setMenu(false)} />
               {dial ? (
-                <div role="menu" aria-label="Add to Clipply" className="absolute right-1 bottom-full mb-4 flex w-max flex-col items-end gap-4">
+                <div role="menu" aria-label="Add to Clipply" className="absolute right-1 bottom-full mb-4 flex w-max origin-bottom-right animate-pop flex-col items-end gap-4">
                   {items.map((a) => <DialAction key={a.label} {...a} />)}
                 </div>
               ) : (
-                <div role="menu" aria-label="Add to Clipply" className="absolute right-0 bottom-full mb-3 w-44 overflow-hidden rounded-xl border border-line bg-raised py-1 shadow-xl">
+                <div role="menu" aria-label="Add to Clipply" className="absolute right-0 bottom-full mb-4 w-48 origin-bottom-right animate-pop rounded-2xl bg-raised p-1.5 shadow-float ring-1 ring-line/60 after:absolute after:right-5 after:-bottom-1.5 after:size-3.5 after:rotate-45 after:rounded-br-sm after:bg-raised">
                   {items.map((a) => <MenuItem key={a.label} {...a} />)}
                 </div>
               )}
@@ -118,7 +118,7 @@ export function AddClip({ className = 'fixed right-8 bottom-8 z-20', dial = fals
             aria-label={menu ? 'Close add menu' : actions.length ? 'Add to Clipply' : 'Add text, image or file'}
             title="Add text, image or file"
             onClick={() => setMenu((m) => !m)}
-            className={`relative flex size-14 items-center justify-center ${dial ? 'rounded-full' : 'rounded-2xl'} bg-hero text-white shadow-[0_12px_28px_-10px_rgb(8_60_70/0.7)] ring-1 ring-white/10 transition hover:brightness-110 disabled:opacity-60`}
+            className={`relative flex size-14 items-center justify-center ${dial ? 'rounded-full' : 'rounded-2xl'} bg-brand text-white shadow-[0_12px_28px_-8px_color-mix(in_srgb,var(--color-clip)_75%,transparent)] ring-1 ring-white/15 transition hover:brightness-110 disabled:opacity-60`}
           >
             <Plus aria-hidden className={`size-7 transition-transform ${menu ? 'rotate-45' : ''}`} />
           </button>
@@ -145,8 +145,8 @@ const toneStyle = (tone: string | undefined): CSSProperties => ({ '--tone': tone
 
 function MenuItem({ icon: Icon, label, onClick, tone }: AddAction) {
   return (
-    <button type="button" role="menuitem" onClick={onClick} style={toneStyle(tone)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[0.9375rem] text-ink hover:bg-surface">
-      <Icon aria-hidden className="size-[18px] text-(--tone)" />
+    <button type="button" role="menuitem" onClick={onClick} style={toneStyle(tone)} className="relative z-10 flex w-full items-center gap-3 rounded-xl p-2 text-left text-[0.9375rem] text-ink hover:bg-surface">
+      <span aria-hidden className="flex size-9 items-center justify-center rounded-lg bg-(--tone)/12 text-(--tone)"><Icon className="size-[18px]" /></span>
       {label}
     </button>
   );

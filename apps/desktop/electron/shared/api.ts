@@ -70,6 +70,8 @@ export interface DesktopStatus {
   screenshotDir: string | null;
   screenshotWatching: boolean;
   items: number;
+  /** Clips per hour over the last 24 hours, oldest first. */
+  activity: number[];
   corrupt: number;
   gnomeShortcut: boolean;
   /** Accelerator registered with Electron globalShortcut, if any (works on X11 only). */

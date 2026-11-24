@@ -13,4 +13,5 @@ export { parseCsv, previewKind, looksLikeText } from './filePreview';
 export * from './theme';
 export * from './settings';
 export * from './add';
+export * from './decor';
 export * from './updates';
