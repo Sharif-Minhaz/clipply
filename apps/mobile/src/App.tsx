@@ -95,7 +95,7 @@ function History({ rt, tab, base, empty, grid }: { rt: Runtime; tab: number; bas
       hero
       heading={
         <div className="flex items-center gap-2.5">
-          <img src={logo} alt="" className="size-9 rounded-xl shadow-[0_6px_14px_-6px_rgb(0_0_0/0.6)]" />
+          <img src={logo} alt="" className="size-9 rounded-xl" />
           <div>
             <h1 className="text-lg leading-tight font-bold tracking-tight">Clipply</h1>
             <p className="text-xs leading-none text-white/80">{hint}</p>

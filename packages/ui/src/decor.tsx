@@ -19,14 +19,14 @@ const CONTOURS = Array.from({ length: LINES }, (_, n) =>
 );
 const DOTS = [[2, 190], [0, 232], [5, 262]] as const;
 
-/** Fine lines like a contour map (sidebar, phone header); set the colour with a text utility. */
-export function ContourLines({ className = '', dots = true }: { className?: string; dots?: boolean }) {
+/** Fine lines like a contour map (desktop sidebar); set the colour with a text utility. */
+export function ContourLines({ className = '' }: { className?: string }) {
   return (
     <svg aria-hidden viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" fill="none" stroke="currentColor" className={`pointer-events-none ${className}`}>
       {CONTOURS.map((d, n) => (
         <path key={d} d={d} vectorEffect="non-scaling-stroke" strokeWidth={n ? 0.8 : 1.4} strokeOpacity={n ? 0.5 - n * 0.033 : 0.9} />
       ))}
-      {dots && DOTS.map(([n, x]) => (
+      {DOTS.map(([n, x]) => (
         // A zero-length round-capped line: stays a circle however the drawing is stretched.
         <path key={x} d={`M${x} ${contourY(n, x)}h0`} vectorEffect="non-scaling-stroke" strokeWidth={5} strokeLinecap="round" />
       ))}

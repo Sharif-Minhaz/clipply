@@ -5,7 +5,6 @@ import type { ClipView, ListFilter } from '@clipply/sync-engine';
 import { htmlToText } from '@clipply/sync-engine/html';
 
 import { useClipply } from './client';
-import { ContourLines } from './decor';
 import { isPendingId } from './optimistic';
 import { useClipList, useLinkPreview, useThumbUrl } from './hooks';
 import { formatBytes, formatRelative } from './time';
@@ -117,11 +116,6 @@ export function SearchStrip(props: {
           : 'top-0 px-6 pt-5 pb-3 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:-bottom-5 before:-z-10 before:veil'
       }`}
     >
-      {props.hero && (
-        <div aria-hidden className="absolute inset-0 -z-10 overflow-hidden rounded-b-3xl">
-          <ContourLines dots={false} className="absolute -right-10 -bottom-6 h-32 w-[130%] text-clip opacity-40" />
-        </div>
-      )}
       <div className={`mx-auto max-w-3xl ${props.hero ? 'space-y-2.5' : 'space-y-3'}`}>
         {/* h-9 + the pt-3 above = the 3rem the hero header sticks above the top (-top-12). */}
         {props.heading && <div className="flex h-9 items-center">{props.heading}</div>}
